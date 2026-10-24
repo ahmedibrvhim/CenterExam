@@ -27,6 +27,68 @@ export async function extractPages(file: File): Promise<string[]> {
   return pages;
 }
 
+// A page with (almost) no text layer is a scan: it is only a picture of a page.
+export const isBlankPage = (t: string) => t.replace(/\s/g, "").length < 25;
+
+export class OcrError extends Error {
+  constructor(public code: string, message: string) { super(message); }
+}
+
+// ---------- 1a) scanned pages: render them as images and let the AI read them (OCR) ----------
+// nums are 1-based page numbers. Returns the text for each of those pages.
+export async function ocrPages(
+  file: File, nums: number[], signal: AbortSignal,
+  hooks: { onProgress?: (done: number, total: number) => void; onRequest?: () => void; onWait?: (secs: number) => void } = {},
+): Promise<Record<number, string>> {
+  // @ts-ignore - pdfjs-dist 3.x ships without usable types for this path
+  const pdfjs: any = await import("pdfjs-dist/build/pdf");
+  pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.js", import.meta.url).toString();
+  const doc = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+  const out: Record<number, string> = {};
+  const PER = 3; // pages per AI request
+
+  const render = async (n: number): Promise<string> => {
+    const page = await doc.getPage(n);
+    const base = page.getViewport({ scale: 1 });
+    const viewport = page.getViewport({ scale: Math.min(2.5, 1500 / base.width) });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(viewport.width); canvas.height = Math.round(viewport.height);
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    const data = canvas.toDataURL("image/jpeg", 0.72).split(",")[1];
+    canvas.width = canvas.height = 0;
+    return data;
+  };
+  const wait = (ms: number) => new Promise<void>((res, rej) => {
+    if (signal.aborted) return rej(new Error("aborted"));
+    const t = setTimeout(res, ms);
+    signal.addEventListener("abort", () => { clearTimeout(t); rej(new Error("aborted")); }, { once: true });
+  });
+
+  for (let i = 0; i < nums.length; i += PER) {
+    if (signal.aborted) throw new Error("aborted");
+    const group = nums.slice(i, i + PER);
+    const images: string[] = [];
+    for (const n of group) images.push(await render(n));
+    for (let attempt = 0; ; attempt++) {
+      hooks.onRequest?.();
+      const res = await fetch("/api/ocr", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ images }), signal });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) { group.forEach((n, k) => { out[n] = String(d.texts?.[k] ?? ""); }); break; }
+      if ((d.code === "rate_minute" || d.code === "busy") && attempt < 3) {
+        const secs = Math.min(90, Math.max(5, d.retryAfter ?? 20));
+        hooks.onWait?.(secs);
+        await wait(secs * 1000);
+        continue;
+      }
+      throw new OcrError(d.code || "error", d.error || "فشلت قراءة الصفحات الممسوحة");
+    }
+    hooks.onProgress?.(Math.min(nums.length, i + PER), nums.length);
+  }
+  return out;
+}
+
 // ---------- 1b) split pages into chunks, and pick the chunks the user cares about ----------
 export type Chunk = { page: number; text: string };
 

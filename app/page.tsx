@@ -4,7 +4,7 @@ import Header from "@/components/Header";
 import AiStatus from "@/components/AiStatus";
 import GenerationPanel, { Gen } from "@/components/GenerationPanel";
 import Library from "@/components/Library";
-import { Chunk, Exam, Q, chunkPages, extractPages, parseQuestions, pickChunks, printExam, rng, shuffle } from "@/exam";
+import { Chunk, Exam, OcrError, Q, chunkPages, extractPages, isBlankPage, ocrPages, parseQuestions, pickChunks, printExam, rng, shuffle } from "@/exam";
 import { listExams, removeExam, saveExam } from "@/lib/db";
 import { Fail, streamBatch } from "@/lib/ai";
 import { Limit, fmtDuration, getLimit, getUsage, msUntilPacificMidnight, recordRequest, saveLimit } from "@/lib/limits";
@@ -16,6 +16,7 @@ const LETTERS = ["A", "B", "C", "D", "E", "F"];
 const TYPES = [["mcq", "اختيار من متعدد"], ["tf", "صح وخطأ"], ["essay", "مقالي"]] as const;
 const DIFFS = [["mixed", "متنوع"], ["easy", "سهل"], ["medium", "متوسط"], ["hard", "صعب"]] as const;
 const MAX_MB = 50;
+const MAX_OCR_PAGES = 40; // scanned pages read per exam (keeps within the free AI limits)
 
 const fmtSize = (b: number) => (b < 1048576 ? `${Math.max(1, Math.round(b / 1024))} KB` : `${(b / 1048576).toFixed(1)} MB`);
 const stripPdf = (n: string) => n.replace(/\.pdf$/i, "");
@@ -140,18 +141,65 @@ export default function Home() {
 
   // Mode 2: the AI writes new questions; they appear on screen one by one
   const generateAI = async () => {
-    const all: Chunk[] = chosen.flatMap((f) => (single ? chunkPages(f.pages!, pFrom, pTo) : chunkPages(f.pages!)));
-    if (all.reduce((n, c) => n + c.text.length, 0) < 400) { notify("لم أجد نصًا كافيًا (قد يكون الملف صورًا ممسوحة)", "error"); return; }
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    const startedAt = Date.now();
+
+    // Step 0: scanned pages (pictures without text) are read by the AI first
+    const pagesOf: Record<string, string[]> = {};
+    for (const f of chosen) pagesOf[f.id] = [...f.pages!];
+    let todo = chosen.flatMap((f) => {
+      const [a, b] = single ? [pFrom, pTo] : [1, f.pages!.length];
+      const nums: number[] = [];
+      for (let p = a; p <= b; p++) if (isBlankPage(f.pages![p - 1])) nums.push(p);
+      return nums.length ? [{ f, nums }] : [];
+    });
+    const blankTotal = todo.reduce((n, t) => n + t.nums.length, 0);
+    const nonBlank = chosen.reduce((n, f) => n + f.pages!.filter((t) => !isBlankPage(t)).length, 0);
+    if (blankTotal > 0 && blankTotal >= nonBlank) {
+      let budget = MAX_OCR_PAGES;
+      todo = todo.map((t) => { const nums = t.nums.slice(0, Math.max(0, budget)); budget -= nums.length; return { f: t.f, nums }; }).filter((t) => t.nums.length);
+      const total = todo.reduce((n, t) => n + t.nums.length, 0);
+      let done = 0;
+      const show = (message: string) => setGen({ phase: "writing", batch: 0, batches: 1, target: count, qs: [], startedAt, message });
+      show(`الملف ممسوح ضوئيًا — جارٍ قراءة ${total} صفحة بالذكاء الاصطناعي…`);
+      setTimeout(() => genRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50);
+      try {
+        for (const t of todo) {
+          const base = done;
+          const res = await ocrPages(t.f.file, t.nums, ctrl.signal, {
+            onRequest: () => setUsage(recordRequest()),
+            onProgress: (d) => show(`جارٍ قراءة الصفحات الممسوحة: ${base + d} من ${total}…`),
+            onWait: (s) => show(`وصلنا حد الطلبات في الدقيقة — سنكمل خلال ${s} ثانية…`),
+          });
+          done += t.nums.length;
+          for (const [n, txt] of Object.entries(res)) pagesOf[t.f.id][Number(n) - 1] = txt;
+          setFiles((p) => p.map((x) => (x.id === t.f.id ? { ...x, pages: pagesOf[t.f.id] } : x))); // remember, so a second exam doesn't re-read
+        }
+      } catch (err) {
+        abortRef.current = null;
+        const stopped = ctrl.signal.aborted;
+        if (err instanceof OcrError && err.code === "rate_day") {
+          const l: Limit = { kind: "day", until: Date.now() + msUntilPacificMidnight() };
+          saveLimit(l); setLimit(l);
+        }
+        setGen({ phase: stopped ? "stopped" : "failed", batch: 0, batches: 1, target: count, qs: [], startedAt, endedAt: Date.now(), message: stopped ? "تم الإيقاف." : err instanceof OcrError ? err.message : "تعذّرت قراءة الصفحات الممسوحة. حاول مرة أخرى." });
+        return;
+      }
+    }
+
+    const all: Chunk[] = chosen.flatMap((f) => (single ? chunkPages(pagesOf[f.id], pFrom, pTo) : chunkPages(pagesOf[f.id])));
+    if (all.reduce((n, c) => n + c.text.length, 0) < 400) {
+      abortRef.current = null; setGen(null);
+      notify("لم أجد نصًا كافيًا في الصفحات المحددة", "error"); return;
+    }
     const picked = pickChunks(all, topic, clamp(Math.ceil(count / 2), 2, 20));
     if (!picked.length) { notify(`لم أجد الموضوع «${topic}» في الصفحات المحددة`, "error"); return; }
     const groups: Chunk[][] = [];
     for (let i = 0; i < picked.length; i += 2) groups.push(picked.slice(i, i + 2));
     const per = Math.min(15, Math.ceil(count / groups.length) + 1); // +1: a little spare in case some questions are rejected
 
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
     const got: Q[] = [], seen = new Set<string>();
-    const startedAt = Date.now();
     setGen({ phase: "writing", batch: 1, batches: groups.length, target: count, qs: [], startedAt });
     setTimeout(() => genRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50);
 
@@ -279,7 +327,7 @@ export default function Home() {
                           <input type="checkbox" checked={selected.includes(f.id)} onChange={() => toggleFile(f.id)} />
                           <span className="fr-name" dir="auto">{f.name}</span>
                         </label>
-                        <span className="fr-size">{f.pages ? `${f.pages.length} ص · ` : "جارٍ القراءة… · "}{fmtSize(f.size)}</span>
+                        <span className="fr-size">{f.pages ? `${f.pages.length} ص · ${f.pages.some(isBlankPage) && f.pages.filter(isBlankPage).length > f.pages.length / 2 ? "ممسوح ضوئيًا (يُقرأ بالذكاء الاصطناعي) · " : ""}` : "جارٍ القراءة… · "}{fmtSize(f.size)}</span>
                         <button type="button" className="del-row-btn" aria-label={`حذف ${f.name}`} onClick={() => removeFile(f.id)}>✕</button>
                       </li>
                     ))}
