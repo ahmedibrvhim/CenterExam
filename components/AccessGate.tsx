@@ -2,8 +2,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import Emblem from "@/components/Emblem";
 import ThemePicker from "@/components/ThemePicker";
-import CodeForm from "@/components/CodeForm";
-import PlanCards from "@/components/PlanCards";
+import SubscribeFlow from "@/components/SubscribeFlow";
 import { useAuth } from "@/components/AuthProvider";
 import { useAccess } from "@/components/AccessProvider";
 
@@ -20,8 +19,6 @@ function useSplashDone() {
   }, []);
   return done;
 }
-
-const WHATSAPP = process.env.NEXT_PUBLIC_CONTACT_WHATSAPP; // optional: country code + number, digits only (e.g. 201012345678)
 
 function Shell({ title, lead, children }: { title: string; lead?: string; children: ReactNode }) {
   const { signOut } = useAuth();
@@ -67,14 +64,11 @@ function ProfileForm() {
 }
 
 function Activation() {
-  const { entitlements, profile } = useAccess();
+  const { entitlements } = useAccess();
   const expired = entitlements.length > 0;
-  const msg = encodeURIComponent(`مرحبًا، أريد الاشتراك في CenterExam.\nالاسم: ${profile?.name ?? ""}\nالهاتف: ${profile?.phone ?? ""}`);
   return (
-    <Shell title={expired ? "انتهى اشتراكك" : "تفعيل الاشتراك"} lead={expired ? "أدخل كود جديد لتجديد الاشتراك." : "للدخول إلى الأداة أدخل كود الاشتراك الذي حصلت عليه من الإدارة."}>
-      <PlanCards />
-      <CodeForm autoFocus />
-      {WHATSAPP && <a className="btn-ghost wa-link" href={`https://wa.me/${WHATSAPP}?text=${msg}`} target="_blank" rel="noreferrer">لا تملك كودًا؟ تواصل معنا على واتساب</a>}
+    <Shell title={expired ? "انتهى اشتراكك" : "الاشتراك في CenterExam"} lead="اختر الاشتراك وحوّل المبلغ، ثم أدخل الكود الذي يصلك للدخول إلى الأداة.">
+      <SubscribeFlow />
     </Shell>
   );
 }

@@ -541,7 +541,7 @@ html[data-splash="done"] .splash:not(.leaving) { display: none; }
 @media (prefers-reduced-motion: reduce) { .login-card { animation: none; } .login-spin { animation-duration: 1.6s; } }
 
 /* ---------- Access gate, plans, admin ---------- */
-.login-card.wide { max-width: 460px; }
+.login-card.wide { max-width: 500px; }
 .login-name.sm { font-size: 22px; margin-top: 4px; }
 .gate-step { margin: 10px 0 4px; font-size: 18px; font-weight: 800; }
 .gate-form { display: grid; gap: 12px; text-align: start; }
@@ -580,3 +580,22 @@ html[data-splash="done"] .splash:not(.leaving) { display: none; }
 .tbl .acts { white-space: nowrap; } .tbl .empty { text-align: center; color: var(--text-3); padding: 24px; }
 .ent-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 3px 0; } .ent-row small { display: inline; }
 @media (max-width: 520px) { .plan-grid { grid-template-columns: 1fr; } .code-row { flex-direction: column; } }
+
+/* ---------- Subscribe flow (plan -> pay -> WhatsApp -> code) ---------- */
+.sub-flow { display: grid; gap: 12px; text-align: start; margin-top: 12px; }
+.sub-flow h4 { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 800; color: var(--text); }
+.step-n2 { width: 22px; height: 22px; flex-shrink: 0; display: inline-grid; place-items: center; border-radius: 50%; background: var(--accent); color: #001018; font-size: 12px; font-weight: 900; }
+.plan-pick { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+button.plan-card { cursor: pointer; font: inherit; color: inherit; transition: border-color .2s, box-shadow .2s, background .2s; }
+.plan-card.sel { border-color: var(--accent); background: rgba(var(--accent-rgb), .12); box-shadow: 0 0 18px rgba(var(--accent-rgb), .25); }
+.subj-pick { display: flex; flex-wrap: wrap; gap: 8px; }
+.subj-chip { padding: 8px 14px; border-radius: var(--r-pill); border: 1px solid rgba(var(--accent-rgb), .25); background: var(--bg-2); color: var(--text); font-size: 13px; font-weight: 700; }
+.subj-chip.sel { background: var(--accent); border-color: var(--accent); color: #001018; }
+.pay-box { display: grid; gap: 10px; padding: 14px; border-radius: var(--r-md); background: var(--bg-2); border: 1px dashed rgba(var(--accent-rgb), .45); }
+.pay-amount { font-size: 13.5px; line-height: 1.8; } .pay-amount b { color: var(--accent-2); }
+.pay-num { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-radius: var(--r-md); background: var(--bg); }
+.pay-num code { font-size: 20px; font-weight: 800; letter-spacing: 2px; color: var(--accent-2); }
+.wa-btn { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 46px; border-radius: var(--r-md); background: #25d366; color: #052e16; font-size: 14px; font-weight: 800; text-decoration: none; transition: transform .15s, box-shadow .2s; }
+.wa-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(37,211,102,.35); }
+.flow-sep { display: flex; align-items: center; gap: 10px; margin-top: 4px; font-size: 12px; color: var(--text-3); }
+.flow-sep::before, .flow-sep::after { content: ""; flex: 1; height: 1px; background: rgba(255,255,255,.1); }

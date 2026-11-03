@@ -1,8 +1,7 @@
 "use client";
 import { useEffect } from "react";
 import { useAccess } from "@/components/AccessProvider";
-import CodeForm from "@/components/CodeForm";
-import PlanCards from "@/components/PlanCards";
+import SubscribeFlow from "@/components/SubscribeFlow";
 import { daysLeft, entLabel } from "@/lib/plans";
 
 // "اشتراكي": my active subscriptions + the prices + a box to activate another code (also opened by tapping a locked subject).
@@ -26,9 +25,8 @@ export default function SubscriptionModal() {
             ))}
           </ul>
         ) : <p className="hint">لا يوجد اشتراك فعّال حاليًا.</p>}
-        <h3>الأسعار (شهريًا)</h3>
-        <PlanCards />
-        <CodeForm />
+        <h3>تجديد أو اشتراك جديد</h3>
+        <SubscribeFlow onDone={closePlans} />
         <p className="hint">الاشتراك يستمر 30 يومًا من لحظة التفعيل، وتفعيل كود جديد لنفس المادة يُضيف المدة بعد انتهاء الحالية.</p>
       </div>
     </div>
