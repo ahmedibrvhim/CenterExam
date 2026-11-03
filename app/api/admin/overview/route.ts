@@ -22,10 +22,22 @@ export async function GET(req: Request) {
       codes: codes.value.docs.map((d) => d.data()),
       orders: orders.status === "fulfilled" ? orders.value.docs.map((d) => d.data()) : [],
       warning: orders.status === "rejected" ? `تعذّر تحميل الطلبات: ${String((orders.reason as any)?.message ?? orders.reason).slice(0, 200)}` : "",
-      users: users.value.docs.filter((d) => !admins.includes(String(d.data().email ?? "").toLowerCase())).map((d) => {
+      users: dedupe(users.value.docs.filter((d) => !admins.includes(String(d.data().email ?? "").toLowerCase())).map((d) => {
         const x = d.data();
         return { uid: x.uid ?? d.id, email: x.email ?? "", displayName: x.displayName ?? "", photoURL: x.photoURL ?? "", name: x.name ?? "", phone: x.phone ?? "", createdAt: x.createdAt ?? 0, entitlements: x.entitlements ?? [] };
-      }),
+      })),
     };
   });
+}
+
+// one row per e-mail (older duplicates from a deleted + recreated Auth account are hidden; they merge on that person's next login)
+function dedupe<T extends { email: string; name: string; entitlements: { expiresAt: number }[]; createdAt: number }>(list: T[]): T[] {
+  const best = new Map<string, T>();
+  const score = (u: T) => Math.max(0, ...u.entitlements.map((e) => e.expiresAt)) * 10 + (u.name ? 1 : 0);
+  for (const u of list) {
+    const k = u.email || Math.random().toString();
+    const b = best.get(k);
+    if (!b || score(u) > score(b)) best.set(k, u);
+  }
+  return [...best.values()];
 }

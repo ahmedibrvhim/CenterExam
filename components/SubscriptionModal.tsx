@@ -6,7 +6,7 @@ import { daysLeft, entLabel } from "@/lib/plans";
 
 // "اشتراكي": my active subscriptions + the prices + a box to activate another code (also opened by tapping a locked subject).
 export default function SubscriptionModal() {
-  const { active, now, closePlans, order } = useAccess();
+  const { active, now, closePlans, order, isAdmin } = useAccess();
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if (e.key === "Escape") closePlans(); };
     window.addEventListener("keydown", k);
@@ -18,6 +18,7 @@ export default function SubscriptionModal() {
       <div className="sub-modal">
         <button type="button" className="sub-x" onClick={closePlans} aria-label="إغلاق">✕</button>
         <h2>اشتراكي</h2>
+        {isAdmin ? <p className="hint">👑 حساب المدير مفتوح على كل المواد بدون اشتراك ولا نهاية.</p> : <>
         {active.length ? (
           <ul className="sub-list">
             {active.map((e) => (
@@ -28,6 +29,7 @@ export default function SubscriptionModal() {
         <h3>{order ? "طلبك الحالي" : "تجديد أو اشتراك جديد"}</h3>
         <SubscribeFlow onDone={closePlans} />
         <p className="hint">الاشتراك يستمر 30 يومًا من لحظة التفعيل، وتفعيل كود جديد لنفس المادة يُضيف المدة بعد انتهاء الحالية.</p>
+        </>}
       </div>
     </div>
   );

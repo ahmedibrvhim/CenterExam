@@ -12,6 +12,7 @@ const newRef = () => Array.from({ length: 5 }, () => CODE_ALPHABET[randomInt(COD
 export async function POST(req: Request) {
   return handle(async () => {
     const u = await requireUser(req);
+    if (u.isAdmin) throw new ApiError(403, "admin_no_sub", "حساب المدير مفتوح دائمًا ولا يحتاج اشتراكًا.");
     const b = await readJson<{ name?: string; phone?: string; plan?: string; subject?: string }>(req);
     const name = cleanName(b.name ?? "");
     const phone = cleanPhone(b.phone ?? "");

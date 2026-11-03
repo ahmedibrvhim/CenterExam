@@ -39,12 +39,15 @@ export default function AccessProvider({ children }: { children: ReactNode }) {
   const [isAdmin, setAdmin] = useState(false);
   const [order, setOrder] = useState<OrderDoc | null>(null);
   const [plansOpen, setPlansOpen] = useState(false);
-  const now = useNow(30_000); // subscriptions end by themselves while the page is open
+  const tick = useNow(30_000); // subscriptions end by themselves while the page is open
+  const [skew, setSkew] = useState(0); // server clock - browser clock
+  // read the clock again whenever the data changes (a stale 30s-old "now" made a fresh 30-day code show 31)
+  const now = useMemo(() => Date.now() + skew, [tick, skew, entitlements]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const refresh = useCallback(async () => {
     const { ok, data } = await call("/api/me");
     if (!ok) { setError(data.error || "تعذّر تحميل بيانات حسابك."); setStatus((s) => (s === "ready" ? s : "error")); return; }
-    setProfile(data.profile); setEnts(data.entitlements ?? []); setAdmin(!!data.isAdmin); setOrder(data.order ?? null); setError(""); setStatus("ready");
+    setProfile(data.profile); setEnts(data.entitlements ?? []); setAdmin(!!data.isAdmin); setOrder(data.order ?? null); if (data.now) setSkew(data.now - Date.now()); setError(""); setStatus("ready");
   }, []);
 
   useEffect(() => {
@@ -63,7 +66,7 @@ export default function AccessProvider({ children }: { children: ReactNode }) {
   const redeem = useCallback(async (code: string) => {
     const { ok, data } = await call("/api/redeem", { code });
     if (!ok) return data.error || "تعذّر تفعيل الكود.";
-    setEnts(data.entitlements ?? []); setOrder(null); refresh(); return "";
+    if (data.now) setSkew(data.now - Date.now()); setEnts(data.entitlements ?? []); setOrder(null); refresh(); return "";
   }, [refresh]);
 
   const createOrder = useCallback(async (o: { name: string; phone: string; plan: Plan; subject?: string }) => {

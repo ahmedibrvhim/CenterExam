@@ -88,3 +88,43 @@ export async function assertSubjectAccess(u: AuthedUser, subject: string) {
   if (!covers(hit.ents, subject, now)) throw new ApiError(403, "no_access", "لا يشمل اشتراكك هذه المادة أو انتهى اشتراكك. فعّل كودًا جديدًا من زر «اشتراكي».");
 }
 export const dropAccessCache = (uid: string) => cache.delete(uid);
+
+// One Firestore record per person (keyed by e-mail), whatever the Firebase Auth uid is.
+// If someone was deleted from Firebase Auth and signs in again, Auth gives a NEW uid: the old record (profile, subscriptions, orders, codes)
+// is merged into the new uid's record and the old one is removed, so there are no duplicates and nothing is lost.
+export async function ensureUserDoc(u: AuthedUser): Promise<FirebaseFirestore.DocumentData> {
+  const ref = db().collection("users").doc(u.uid);
+  const [cur, same] = await Promise.all([ref.get(), u.email ? db().collection("users").where("email", "==", u.email).get() : Promise.resolve(null)]);
+  const olds = (same?.docs ?? []).filter((d) => d.id !== u.uid);
+  const now = Date.now();
+  if (!olds.length) {
+    if (cur.exists) return cur.data()!;
+    const d = { uid: u.uid, email: u.email, displayName: u.name, photoURL: u.picture, name: "", phone: "", createdAt: now, entitlements: [] as Entitlement[] };
+    await ref.set(d);
+    return d;
+  }
+  const all = [...(cur.exists ? [cur.data()!] : []), ...olds.map((d) => d.data())];
+  const byUpdate = [...all].sort((x, y) => (y.updatedAt ?? y.createdAt ?? 0) - (x.updatedAt ?? x.createdAt ?? 0));
+  const ents = new Map<string, Entitlement>();
+  for (const d of all) for (const e of (d.entitlements ?? []) as Entitlement[]) {
+    const k = ents.get(e.subject);
+    if (!k || e.expiresAt > k.expiresAt) ents.set(e.subject, { ...e, startedAt: Math.min(e.startedAt ?? e.expiresAt, k?.startedAt ?? Infinity) });
+  }
+  const pick = (f: string) => byUpdate.find((d) => d[f])?.[f] ?? "";
+  const merged = {
+    uid: u.uid, email: u.email, displayName: u.name || pick("displayName"), photoURL: u.picture || pick("photoURL"),
+    name: pick("name"), phone: pick("phone"), createdAt: Math.min(...all.map((d) => d.createdAt ?? now)), updatedAt: now,
+    entitlements: [...ents.values()],
+  };
+  const batch = db().batch();
+  batch.set(ref, merged);
+  for (const o of olds) {
+    batch.delete(o.ref);
+    const [os, cs] = await Promise.all([db().collection("orders").where("uid", "==", o.id).get(), db().collection("codes").where("usedBy", "==", o.id).get()]);
+    os.docs.forEach((x) => batch.update(x.ref, { uid: u.uid }));
+    cs.docs.forEach((x) => batch.update(x.ref, { usedBy: u.uid }));
+  }
+  await batch.commit();
+  dropAccessCache(u.uid);
+  return merged;
+}

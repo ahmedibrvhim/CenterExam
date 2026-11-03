@@ -10,6 +10,7 @@ const LOCK_MS = 15 * 60_000;   // ...lock code entry for this long (stops guessi
 export async function POST(req: Request) {
   return handle(async () => {
     const u = await requireUser(req);
+    if (u.isAdmin) throw new ApiError(403, "admin_no_sub", "حساب المدير مفتوح دائمًا ولا يحتاج اشتراكًا.");
     const b = await readJson<{ code?: string }>(req);
     const id = normalizeCode(b.code ?? "");
     const userRef = db().collection("users").doc(u.uid);
