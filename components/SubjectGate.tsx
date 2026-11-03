@@ -1,10 +1,11 @@
 "use client";
 import { SUBJECTS, type SubjectId } from "@/lib/subjects";
 import { useAccess } from "@/components/AccessProvider";
+import { isForever, leftText, paidCover } from "@/lib/plans";
 
 // Shown before the tool opens: the teacher picks the subject, and the tool then adapts its inputs (question types, counts, AI rules).
 export default function SubjectGate({ onPick }: { onPick: (id: SubjectId) => void }) {
-  const { can, openPlans, lapsed } = useAccess();
+  const { can, openPlans, lapsed, entitlements, now, isAdmin } = useAccess();
   return (
     <section className="gate" aria-labelledby="gate-title">
       <div className="gate-head">
@@ -14,12 +15,13 @@ export default function SubjectGate({ onPick }: { onPick: (id: SubjectId) => voi
       <div className="gate-grid">
         {SUBJECTS.map((s, i) => {
           const ok = can(s.id);
+          const paid = isAdmin ? undefined : paidCover(entitlements, s.id, now);   // running paid subscription: shown as active, nothing to renew
           return (
           <button key={s.id} type="button" className={`gate-card${s.ready ? " ready" : ""}${ok ? "" : " locked"}`} style={{ animationDelay: `${i * 70}ms` }} onClick={() => (ok ? onPick(s.id) : openPlans(s.id))}>
             <span className="gate-ico" aria-hidden="true">{s.icon}</span>
             <span className="gate-name">{s.name}</span>
             <span className="gate-tag">{s.tagline}</span>
-            {!ok ? <span className="gate-badge">{lapsed(s.id) ? "🔒 انتهى اشتراكك — اضغط للتجديد" : "🔒 اضغط للاشتراك في هذه المادة"}</span> : s.ready ? <span className="gate-badge ok">أنواع أسئلة مخصّصة</span> : <span className="gate-badge">أنواع عامة · التخصيص قريبًا</span>}
+            {!ok ? <span className="gate-badge">{lapsed(s.id) ? "🔒 انتهى اشتراكك — اضغط للتجديد" : "🔒 اضغط للاشتراك في هذه المادة"}</span> : paid ? <span className="gate-badge ok">✓ مشترك · {isForever(paid) ? "دائم ∞" : `متبقٍّ ${leftText(paid, now)}`}</span> : s.ready ? <span className="gate-badge ok">أنواع أسئلة مخصّصة</span> : <span className="gate-badge">أنواع عامة · التخصيص قريبًا</span>}
           </button>
           );
         })}

@@ -1,5 +1,5 @@
 import { ApiError, db, dropAccessCache, handle, readJson, requireUser } from "@/lib/server/admin";
-import { grantTerm, isCodeShape, normalizeCode, termOf, type CodeDoc, type Entitlement, type OrderDoc } from "@/lib/plans";
+import { ACTIVE_MSG, grantTerm, isCodeShape, normalizeCode, paidCover, termOf, type CodeDoc, type Entitlement, type OrderDoc } from "@/lib/plans";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,6 +31,8 @@ export async function POST(req: Request) {
         tx.set(userRef, fails >= MAX_FAILS ? { redeemFails: 0, redeemLockUntil: now + LOCK_MS } : { redeemFails: fails }, { merge: true });
         return { err: [400, "bad_code", "الكود غير صحيح أو سبق استخدامه أو تم إلغاؤه."] as const };
       }
+
+      if (paidCover(user.entitlements, code.subject, now)) return { err: [409, "already_active", ACTIVE_MSG] as const }; // subscription still running: the code stays unused until it ends
 
       const term = termOf(code); // forever codes never expire (and are not "30 days"); old codes have no term = monthly
       const ents: Entitlement[] = grantTerm(user.entitlements, code.subject, term, id, now, term === "forever" ? undefined : code.days || undefined);

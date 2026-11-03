@@ -18,7 +18,7 @@ type Ctx = {
   createOrder: (o: { name: string; phone: string; plan: Plan; term: PaidTerm; subject?: string }) => Promise<string>;   // "make subscription": returns "" or an error message
   startTrial: (name: string, phone: string) => Promise<string>;   // free 1-hour trial of all subjects, once per user: returns "" or an error message
   cancelOrder: () => Promise<string>;
-  plansOpen: boolean; plansSubject: string | null; openPlans: (subject?: string | null) => void; closePlans: () => void;
+  plansOpen: boolean; plansSubject: string | null; plansMode: "details" | "subscribe"; openPlans: (subject?: string | null, mode?: "details" | "subscribe") => void; closePlans: () => void;   // details = the header button (only shows my subscriptions); subscribe = tapping a locked subject
   lapsed: (subject: string) => boolean;        // had this subject (or all) before and it has ended
 };
 const C = createContext<Ctx | null>(null);
@@ -42,6 +42,7 @@ export default function AccessProvider({ children }: { children: ReactNode }) {
   const [order, setOrder] = useState<OrderDoc | null>(null);
   const [plansOpen, setPlansOpen] = useState(false);
   const [plansSubject, setPlansSubject] = useState<string | null>(null);
+  const [plansMode, setPlansMode] = useState<"details" | "subscribe">("subscribe");
   const [ever, setEver] = useState(false);
   const [trialUsed, setTrialUsed] = useState(false);
   const tick = useNow(30_000); // subscriptions end by themselves while the page is open
@@ -103,9 +104,9 @@ export default function AccessProvider({ children }: { children: ReactNode }) {
     active: activeOf(entitlements, now),
     can: (subject: string) => isAdmin || covers(entitlements, subject, now),
     refresh, saveProfile, redeem, createOrder, startTrial, cancelOrder,
-    plansOpen, plansSubject, openPlans: (s?: string | null) => { setPlansSubject(s ?? null); setPlansOpen(true); }, closePlans: () => setPlansOpen(false),
+    plansOpen, plansSubject, plansMode, openPlans: (s?: string | null, mode: "details" | "subscribe" = "subscribe") => { setPlansSubject(s ?? null); setPlansMode(mode); setPlansOpen(true); }, closePlans: () => setPlansOpen(false),
     lapsed: (subject: string) => entitlements.some((e) => (e.subject === "all" || e.subject === subject) && e.expiresAt <= now),
-  }), [status, error, profile, entitlements, isAdmin, now, order, refresh, saveProfile, redeem, createOrder, startTrial, cancelOrder, plansOpen, plansSubject, ever, trialUsed]);
+  }), [status, error, profile, entitlements, isAdmin, now, order, refresh, saveProfile, redeem, createOrder, startTrial, cancelOrder, plansOpen, plansSubject, plansMode, ever, trialUsed]);
 
   return <C.Provider value={value}>{children}{plansOpen && status === "ready" && <SubscriptionModal />}</C.Provider>;
 }

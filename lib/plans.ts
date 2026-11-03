@@ -23,7 +23,7 @@ export const SUBJECT_COUNT = SUBJECTS.length;
 export const PRICES: Record<PaidTerm, Record<Plan, number>> = {
   month: { single: UNIT_PRICE, all: Math.round(SUBJECT_COUNT * UNIT_PRICE * 0.5) },
   year: { single: 1000, all: 2500 },
-  forever: { single: 2000, all: 4000 },
+  forever: { single: 3000, all: 5000 },
 };
 export const priceOf = (term: Term, plan: Plan) => (isPaidTerm(term) ? PRICES[term][plan] : 0);
 // what the same thing would cost bought subject by subject (shown crossed out next to "all subjects")
@@ -42,6 +42,11 @@ export const isActive = (e: Entitlement, now: number) => e.expiresAt > now;
 export const activeOf = (list: Entitlement[] | undefined, now: number) => (list ?? []).filter((e) => isActive(e, now));
 export const covers = (list: Entitlement[] | undefined, subject: string, now: number) =>
   activeOf(list, now).some((e) => e.subject === "all" || e.subject === subject);
+// A PAID right (not the free trial) that is still running and covers `key`: while it exists the teacher cannot order / redeem the same thing again.
+// A subject is covered by its own right or by "all"; "all" is only covered by an active "all" (so a single-subject teacher can still upgrade to all).
+export const paidCover = (list: Entitlement[] | undefined, key: EntKey, now: number) =>
+  activeOf(list, now).find((e) => !isTrial(e) && (e.subject === "all" || e.subject === key));
+export const ACTIVE_MSG = "اشتراكك الحالي ما زال ساريًا، لا يمكنك التجديد أو شراء اشتراك جديد لنفس المادة قبل انتهائه.";
 export const isForever = (e: Entitlement) => e.term === "forever" || e.expiresAt >= FOREVER_AT;
 export const isTrial = (e: Entitlement) => e.term === "trial";
 export const daysLeft = (e: Entitlement, now: number) => (isForever(e) ? Infinity : Math.max(0, Math.ceil((e.expiresAt - now) / DAY_MS)));

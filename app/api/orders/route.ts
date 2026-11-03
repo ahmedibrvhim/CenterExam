@@ -1,6 +1,6 @@
 import { randomInt } from "crypto";
 import { ApiError, db, handle, readJson, requireUser } from "@/lib/server/admin";
-import { CODE_ALPHABET, TERM_DAYS, cleanName, cleanPhone, isOpenOrder, isPaidTerm, listPriceOf, priceOf, type EntKey, type OrderDoc, type PaidTerm, type Plan } from "@/lib/plans";
+import { ACTIVE_MSG, CODE_ALPHABET, TERM_DAYS, cleanName, cleanPhone, isOpenOrder, isPaidTerm, listPriceOf, paidCover, priceOf, type EntKey, type OrderDoc, type PaidTerm, type Plan } from "@/lib/plans";
 import { getSubject } from "@/lib/subjects";
 
 export const runtime = "nodejs";
@@ -28,6 +28,10 @@ export async function POST(req: Request) {
       if (!s) throw new ApiError(400, "bad_subject", "اختر المادة.");
       subject = s.id;
     }
+
+    // still subscribed (paid, not ended) to this subject / to all subjects -> no renewal and no new order until it ends
+    const me = await db().collection("users").doc(u.uid).get();
+    if (paidCover(me.data()?.entitlements, subject, Date.now())) throw new ApiError(409, "already_active", ACTIVE_MSG);
 
     // one open order at a time: an unpaid one is replaced, one whose code was already issued must be finished first
     const mine = await db().collection("orders").where("uid", "==", u.uid).get();

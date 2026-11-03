@@ -43,7 +43,7 @@ export default function Header({ subject, onChangeSubject }: { subject?: Subject
               <span aria-hidden="true">{s.icon}</span><b>{s.name}</b><small>تغيير ‹</small>
             </button>
           )}
-          <button type="button" className={`sub-status ${sub.cls}`} onClick={() => openPlans(s?.id ?? null)} title={detail} aria-label={`حالة الاشتراك: ${sub.text} — اضغط للتفاصيل والتجديد`}>
+          <button type="button" className={`sub-status ${sub.cls}`} onClick={() => openPlans(null, "details")} title={detail} aria-label={`حالة الاشتراك: ${sub.text} — اضغط لعرض التفاصيل`}>
             <span className="sub-dot" aria-hidden="true" />{sub.text}
           </button>
           {isAdmin && <a href="/admin" className="btn-ghost hdr-admin">الإدارة</a>}

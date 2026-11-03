@@ -5,10 +5,14 @@ import SubscribeFlow from "@/components/SubscribeFlow";
 import { TERM_LABEL, entLabel, isForever, isLow, leftText, termOf } from "@/lib/plans";
 import { getSubject } from "@/lib/subjects";
 
-// "اشتراكي": my active subscriptions + the prices + a box to activate another code (also opened by tapping a locked subject).
+// Two ways to open it:
+//   "details"   (the subscription button in the header): ONLY shows my subscriptions and what is left. No renewal, no order form.
+//   "subscribe" (tapping a locked subject on the subjects page): that subject's order / payment / code flow. A subject that is still
+//               covered by a running paid subscription never reaches this screen (and the server refuses it too).
 export default function SubscriptionModal() {
-  const { active, now, closePlans, order, isAdmin, plansSubject, lapsed } = useAccess();
-  const one = plansSubject ? getSubject(plansSubject) : null;   // opened from a subject: show only that subject
+  const { active, now, closePlans, order, isAdmin, plansSubject, plansMode, lapsed } = useAccess();
+  const details = plansMode === "details";
+  const one = !details && plansSubject ? getSubject(plansSubject) : null;   // opened from a subject: show only that subject
   const mine = one ? active.filter((e) => e.subject === one.id || e.subject === "all") : active;
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if (e.key === "Escape") closePlans(); };
@@ -29,9 +33,15 @@ export default function SubscriptionModal() {
             ))}
           </ul>
         ) : <p className="hint">{one && lapsed(one.id) ? `انتهى اشتراكك في ${one.name}. جدّد من الأسفل لفتحها من جديد.` : one ? `لا يوجد اشتراك فعّال في ${one.name}.` : "لا يوجد اشتراك فعّال حاليًا."}</p>}
-        <h3>{order ? "طلبك الحالي" : mine.length ? "تجديد / إضافة أيام" : "اشتراك"}</h3>
-        <SubscribeFlow onDone={closePlans} subject={one?.id ?? null} />
-        <p className="hint">الشهري 30 يومًا والسنوي 365 يومًا من لحظة التفعيل، وتفعيل كود جديد لنفس المادة يُضيف المدة بعد انتهاء الحالية. الاشتراك الدائم لا ينتهي، والتجربة المجانية ساعة واحدة مرة لكل مستخدم.</p>
+
+        {details ? <>
+          {order && <p className="hint">لديك طلب رقم #{order.ref} قيد التفعيل. لإكمال الدفع أو إدخال الكود افتح مادة مقفلة من صفحة المواد.</p>}
+          <p className="hint">الاشتراك لا يُجدَّد ولا يُشترى من جديد قبل انتهائه. عند انتهاء مادة تظهر مقفلة في صفحة المواد، وتجدّدها من هناك.</p>
+        </> : <>
+          <h3>{order ? "طلبك الحالي" : "اشتراك"}</h3>
+          <SubscribeFlow onDone={closePlans} subject={one?.id ?? null} />
+          <p className="hint">الشهري 30 يومًا والسنوي 365 يومًا من لحظة التفعيل. الاشتراك الدائم لا ينتهي، والتجربة المجانية ساعة واحدة مرة لكل مستخدم.</p>
+        </>}
         </>}
       </div>
     </div>
