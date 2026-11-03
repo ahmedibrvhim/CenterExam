@@ -120,10 +120,11 @@ export default function Home() {
     syncKey();
     const onFocus = () => syncKey();
     window.addEventListener("focus", onFocus);
-    window.addEventListener("gemini-key-changed", onFocus);
+    const onKeyChanged = (e: Event) => { const h = (e as CustomEvent).detail?.hasKey; if (typeof h === "boolean") setNoKey(!h); void syncKey(); }; // hide / show the "add your key" banner right away
+    window.addEventListener("gemini-key-changed", onKeyChanged);
     listExams().then(setExams).catch(() => notify("تعذّر فتح قاعدة البيانات المحلية (قد يكون المتصفح في وضع التصفح الخفي)", "error")).finally(() => setLoadingDb(false));
     try { navigator.storage?.persist?.(); } catch {} // ask the browser not to delete our data when disk space is low
-    return () => { window.removeEventListener("focus", onFocus); window.removeEventListener("gemini-key-changed", onFocus); };
+    return () => { window.removeEventListener("focus", onFocus); window.removeEventListener("gemini-key-changed", onKeyChanged); };
   }, []);
 
   // Which API key does the server use now? The request counter and the "limit reached" state belong to ONE key:

@@ -31,14 +31,14 @@ export default function GeminiKeyModal({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener("keydown", k);
   }, [call]);
 
-  const changed = () => window.dispatchEvent(new Event("gemini-key-changed"));
+  const changed = (hasKey: boolean) => window.dispatchEvent(new CustomEvent("gemini-key-changed", { detail: { hasKey } }));
 
   const save = async () => {
     setBusy(true); setMsg(null);
     const { ok, d } = await call("POST", { key: value.trim() });
     setBusy(false);
     if (!ok) return setMsg({ ok: false, text: d.error || "تعذّر حفظ المفتاح." });
-    setHasOwn(true); setLast4(d.last4 || ""); setValue(""); setMsg({ ok: true, text: "تم حفظ مفتاحك. يمكنك الآن توليد الأسئلة." }); changed();
+    setHasOwn(true); setLast4(d.last4 || ""); setValue(""); setMsg({ ok: true, text: "تم حفظ مفتاحك. يمكنك الآن توليد الأسئلة." }); changed(true);
   };
   const remove = async () => {
     if (!confirm("حذف مفتاحك؟ لن تستطيع توليد أسئلة حتى تضيف مفتاحًا جديدًا.")) return;
@@ -46,7 +46,7 @@ export default function GeminiKeyModal({ onClose }: { onClose: () => void }) {
     const { ok, d } = await call("DELETE");
     setBusy(false);
     if (!ok) return setMsg({ ok: false, text: d.error || "تعذّر الحذف." });
-    setHasOwn(false); setLast4(""); setMsg({ ok: true, text: "تم حذف المفتاح." }); changed();
+    setHasOwn(false); setLast4(""); setMsg({ ok: true, text: "تم حذف المفتاح." }); changed(false);
   };
 
   if (!mounted) return null;

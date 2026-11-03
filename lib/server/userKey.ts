@@ -29,16 +29,17 @@ function decrypt(enc: string): string | null {
 // NO key-format rule (Google has changed the format before and will again). Only sanity: one token, no spaces, sensible length.
 export const looksLikeGeminiKey = (k: string) => k.length >= 8 && k.length <= 600 && !/\s/.test(k);
 
+// Only a FOUND key is cached (briefly). "No key" is never cached: on Vercel several server instances run side by side, and an instance that
+// remembered "no key" would keep telling the teacher to add a key for a while after another instance had saved it.
 const cache = new Map<string, { at: number; key: string | null; last4: string }>();
 async function load(u: AuthedUser) {
   const id = trialKey(u), hit = cache.get(id);
-  if (hit && Date.now() - hit.at < 60_000) return hit;
+  if (hit && hit.key && Date.now() - hit.at < 30_000) return hit;
   const s = await db().collection(COL).doc(id).get();
   const enc = s.exists ? String(s.data()?.enc ?? "") : "";
   const key = enc ? decrypt(enc) : null;
   const v = { at: Date.now(), key, last4: key ? key.slice(-4) : "" };
-  cache.set(id, v);
-  if (cache.size > 500) cache.clear();
+  if (key) { cache.set(id, v); if (cache.size > 500) cache.clear(); } else cache.delete(id);
   return v;
 }
 
