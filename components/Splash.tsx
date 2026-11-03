@@ -67,7 +67,7 @@ export default function Splash() {
           ))}
         </h1>
 
-        <p className="splash-sub">مولّد الاختبارات الذكي</p>
+        <p className="splash-sub">مولّد امتحانات</p>
         <p className="splash-lead">حوّل أي كتاب إلى اختبار جاهز في دقائق — والأسئلة تظهر أمامك لحظة بلحظة.</p>
 
         <ol className="splash-steps">

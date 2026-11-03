@@ -7,6 +7,7 @@ import { msUntilPacificMidnight } from "@/lib/limits";
 import { ALL_KINDS, BRANCH_LABEL, GRADE_ORD, STAGE_SHORT, type Branch, type Stage } from "@/lib/subjects";
 import { balanceCheck } from "@/lib/chem";
 import { hintsFor, norm } from "@/lib/analyze";
+import { ApiError, assertSubjectAccess, requireUser } from "@/lib/server/admin";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -292,6 +293,17 @@ const THINKING: Array<Record<string, unknown> | null> = [
 const thinkingByModel: Record<string, number> = {}; // learned at runtime
 
 export async function POST(req: Request) {
+  // only signed-in teachers whose subscription covers this subject may use the AI (and the Gemini key)
+  let subjectReq = "";
+  try {
+    const u = await requireUser(req);
+    subjectReq = String(((await req.clone().json()) as { subject?: string })?.subject ?? "");
+    await assertSubjectAccess(u, subjectReq);
+  } catch (e) {
+    if (e instanceof ApiError) return NextResponse.json({ code: e.code, error: e.message }, { status: e.status });
+    return NextResponse.json({ code: "bad_request", error: "طلب غير صالح" }, { status: 400 });
+  }
+
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return NextResponse.json({ code: "no_key", error: "مفتاح GEMINI_API_KEY غير موجود. أضفه في إعدادات Vercel (Environment Variables) ثم أعد النشر." }, { status: 500 });
 

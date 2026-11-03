@@ -2,6 +2,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Header from "@/components/Header";
 import SubjectGate from "@/components/SubjectGate";
+import { useAccess } from "@/components/AccessProvider";
+import { authFetch } from "@/lib/authFetch";
 import AiStatus from "@/components/AiStatus";
 import GenerationPanel, { Gen } from "@/components/GenerationPanel";
 import Library from "@/components/Library";
@@ -84,6 +86,7 @@ export default function Home() {
   const [title, setTitle] = useState("");
   const [grade, setGrade] = useState(""); // total mark printed on the exam sheet (optional)
   // how many questions of each type ONE copy of the exam has (text, so typing "30" is not interrupted; clamped only when used)
+  const { can } = useAccess();
   const [subjectId, setSubjectId] = useState<SubjectId | null | undefined>(undefined); // undefined = still reading the saved choice
   const subject = getSubject(subjectId);
   const [forced, setForced] = useState<Kind[]>([]);      // question types the teacher switched on although the pages do not seem to fit
@@ -109,7 +112,7 @@ export default function Home() {
   useEffect(() => {
     let id: string | null = null;
     try { id = sessionStorage.getItem(SUBJECT_KEY); } catch {}
-    setSubjectId(getSubject(id) ? (id as SubjectId) : null);
+    setSubjectId(getSubject(id) && can(id as SubjectId) ? (id as SubjectId) : null);
   }, []);
 
   // load saved exams + remembered daily limit when the page opens
@@ -138,7 +141,7 @@ export default function Home() {
       }
       if (k.hasKey && !isKeySeen(id)) {
         markKeySeen(id);
-        const p = await (await fetch("/api/key?probe=1", { cache: "no-store" })).json();
+        const p = await (await authFetch("/api/key?probe=1", { cache: "no-store" })).json();
         if (getKeyId() !== id) return; // the key changed again while we were asking
         if (p.status === "rate_day") { const l: Limit = { kind: "day", until: Date.now() + msUntilPacificMidnight() }; saveLimit(l); setLimit(l); }
         else if (p.status === "rate_minute") setLimit({ kind: "minute", until: Date.now() + clamp(p.retryAfter ?? 30, 5, 90) * 1000 });
@@ -288,6 +291,7 @@ export default function Home() {
   const applySuggestion = () => { touchedCounts.current = true; const t = zeroText(); for (const k of activeKinds) t[k] = String(suggestion[k]); setCountText(t); };
 
   const chooseSubject = (id: SubjectId) => {
+    if (!can(id)) return;
     try { sessionStorage.setItem(SUBJECT_KEY, id); } catch {}
     touchedCounts.current = false; setForced([]);
     setSubjectId(id);

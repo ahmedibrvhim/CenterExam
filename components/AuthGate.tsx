@@ -4,6 +4,8 @@ import Emblem from "@/components/Emblem";
 import ThemePicker from "@/components/ThemePicker";
 import Splash from "@/components/Splash";
 import { useAuth } from "@/components/AuthProvider";
+import AccessProvider from "@/components/AccessProvider";
+import AccessGate from "@/components/AccessGate";
 
 // Facebook / Instagram / WhatsApp / Messenger / TikTok in-app browsers: Google refuses sign-in there (error 403 disallowed_useragent).
 const inAppBrowser = (ua: string) => /FBAN|FBAV|FB_IAB|Instagram|Line\/|MicroMessenger|Snapchat|TikTok|musical_ly|Messenger|WhatsApp/i.test(ua);
@@ -35,7 +37,7 @@ function LoginPage() {
       <section className="login-card" aria-labelledby="login-title">
         <div className="login-emblem"><Emblem animated size={96} /></div>
         <h1 id="login-title" className="login-name" dir="ltr">CenterExam</h1>
-        <p className="login-sub">مولّد الاختبارات الذكي</p>
+        <p className="login-sub">مولّد امتحانات</p>
         <p className="login-lead">سجّل الدخول بحساب Google للمتابعة. تبقى مسجّلًا طوال الجلسة فقط، وعند إغلاق المتصفح يُطلب منك الدخول من جديد.</p>
 
         {webview ? (
@@ -53,7 +55,6 @@ function LoginPage() {
 
         {!configured && <p className="login-err" role="alert">لم يتم ربط Firebase بعد — أضف متغيرات <code dir="ltr">NEXT_PUBLIC_FIREBASE_*</code> في ملف <code dir="ltr">.env.local</code>.</p>}
         {error && <p className="login-err" role="alert">{error}</p>}
-        <p className="login-fine">باستمرارك فإنك توافق على استخدام حسابك للتعريف فقط. لا نحصل على كلمة مرور Google.</p>
       </section>
     </main>
   );
@@ -64,5 +65,5 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   const { status } = useAuth();
   if (status === "loading") return <div className="login login-loading" role="status" aria-label="جاري التحميل"><span className="login-spin big" /></div>;
   if (status === "signedOut") return <LoginPage />;
-  return (<>{children}<Splash /></>);
+  return (<><AccessProvider><AccessGate>{children}</AccessGate></AccessProvider><Splash /></>);
 }

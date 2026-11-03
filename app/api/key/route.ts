@@ -3,6 +3,7 @@ import { createHash } from "crypto";
 import { classify } from "@/lib/geminiErrors";
 import { markDayLimit, readState } from "@/lib/store";
 import { msUntilPacificMidnight } from "@/lib/limits";
+import { ApiError, requireUser } from "@/lib/server/admin";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -18,6 +19,9 @@ export async function GET(req: Request) {
   const shared = await readState(id); // null when no shared database is configured
   const extra = shared ? { shared: true, usage: shared.usage, dayLeftMs: shared.dayLeftMs } : { shared: false };
   if (new URL(req.url).searchParams.get("probe") !== "1") return NextResponse.json({ hasKey: true, id, ...extra });
+
+  // the probe spends real Gemini requests: signed-in users only
+  try { await requireUser(req); } catch (e) { if (e instanceof ApiError) return NextResponse.json({ code: e.code, error: e.message }, { status: e.status }); throw e; }
 
   // each model has its own free quota: the key counts as "out" only when every model we try says so
   const models = ["gemini-flash-latest", "gemini-flash-lite-latest"];

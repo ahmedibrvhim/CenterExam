@@ -1,4 +1,5 @@
 import type { Q } from "@/exam";
+import { authFetch } from "@/lib/authFetch";
 
 export type Fail = { code: string; message: string; retryAfter?: number };
 
@@ -26,7 +27,7 @@ export async function streamBatch(body: object, signal: AbortSignal, onQ: (q: Q)
   }
 
   async function run(): Promise<Fail | null> {
-  const res = await fetch("/api/generate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: local.signal });
+  const res = await authFetch("/api/generate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: local.signal });
   if (!res.ok || !res.body) {
     const d = await res.json().catch(() => ({}));
     // Vercel/proxy gateway errors (502/503/504) come back as plain text, not JSON: treat them as "try again with a smaller batch".
