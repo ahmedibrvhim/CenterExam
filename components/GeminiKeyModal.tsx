@@ -68,12 +68,12 @@ export default function GeminiKeyModal({ onClose }: { onClose: () => void }) {
         <ol className="hint" style={{ paddingInlineStart: 18, display: "grid", gap: 4, marginTop: 6 }}>
           <li>افتح <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" dir="ltr" style={{ textDecoration: "underline" }}>aistudio.google.com/apikey</a> وسجّل الدخول بحساب Google.</li>
           <li>اضغط <b dir="ltr">Create API key</b> (لا يحتاج بطاقة بنكية).</li>
-          <li>انسخ المفتاح (يبدأ بـ <span dir="ltr">AIza</span>) والصقه هنا.</li>
+          <li>انسخ المفتاح كاملًا والصقه هنا.</li>
         </ol>
 
         <div className="sub-flow">
-          <input className="input mono" dir="ltr" type="password" autoComplete="off" spellCheck={false} placeholder="AIza…" value={value} onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && value.trim() && !busy) void save(); }} />
-          <button type="button" className="btn-primary" disabled={busy || value.trim().length < 20} onClick={save}>{busy ? "جارٍ التحقق…" : hasOwn ? "استبدال المفتاح" : "حفظ المفتاح"}</button>
+          <input className="input mono" dir="ltr" type="password" autoComplete="off" spellCheck={false} placeholder="الصق المفتاح هنا" value={value} onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && value.trim() && !busy) void save(); }} />
+          <button type="button" className="btn-primary" disabled={busy || value.trim().length < 8} onClick={save}>{busy ? "جارٍ التحقق…" : hasOwn ? "استبدال المفتاح" : "حفظ المفتاح"}</button>
           {hasOwn && <button type="button" className="btn-ghost" disabled={busy} onClick={remove}>حذف مفتاحي</button>}
           {msg && <p className="hint" role="status" style={{ color: msg.ok ? "#6ee7b7" : "#fca5a5" }}>{msg.text}</p>}
         </div>

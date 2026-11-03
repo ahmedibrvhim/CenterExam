@@ -18,8 +18,8 @@ export async function POST(req: Request) {
     const u = await requireUser(req);
     const b = await readJson<{ key?: string }>(req);
     const key = String(b.key ?? "").trim().replace(/^["']|["']$/g, "");
-    if (!looksLikeGeminiKey(key)) throw new ApiError(400, "bad_key_format", "الصيغة غير صحيحة. المفتاح يبدأ بـ AIza ولا يحتوي مسافات. انسخه كاملًا من Google AI Studio.");
-    if ((await checkGeminiKey(key)) === "bad") throw new ApiError(400, "bad_key", "رفضت Google هذا المفتاح. تأكد أنك نسخته كاملًا وأنه مفعّل في Google AI Studio.");
+    if (!looksLikeGeminiKey(key)) throw new ApiError(400, "bad_key_format", "المفتاح غير مكتمل أو فيه مسافات. انسخه كاملًا من Google AI Studio.");
+    if ((await checkGeminiKey(key)) === "bad") throw new ApiError(400, "bad_key", "رفضت Google هذا المفتاح (غير صالح). تأكد أنك نسخته كاملًا من Google AI Studio.");
     await saveUserKey(u, key);
     return { ok: true, hasOwn: true, last4: key.slice(-4) };
   });

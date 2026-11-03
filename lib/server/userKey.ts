@@ -26,7 +26,8 @@ function decrypt(enc: string): string | null {
   } catch { return null; }
 }
 
-export const looksLikeGeminiKey = (k: string) => /^AIza[0-9A-Za-z_-]{30,60}$/.test(k);
+// NO key-format rule (Google has changed the format before and will again). Only sanity: one token, no spaces, sensible length.
+export const looksLikeGeminiKey = (k: string) => k.length >= 8 && k.length <= 600 && !/\s/.test(k);
 
 const cache = new Map<string, { at: number; key: string | null; last4: string }>();
 async function load(u: AuthedUser) {
@@ -65,12 +66,15 @@ export async function deleteUserKey(u: AuthedUser) {
   cache.delete(id);
 }
 
-// One cheap call to Google (listing models costs no generation quota) to know whether the key is real.
+// One cheap call to Google (listing models costs no generation quota).
+// A key is rejected ONLY when Google explicitly says it is invalid; any other answer (network problem, other 4xx/5xx) still saves it.
 export async function checkGeminiKey(key: string): Promise<"ok" | "bad" | "unknown"> {
   try {
     const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1", { headers: { "x-goog-api-key": key }, signal: AbortSignal.timeout(8000) });
     if (r.ok) return "ok";
-    if (r.status === 400 || r.status === 401 || r.status === 403) return "bad";
+    const j: any = await r.json().catch(() => ({}));
+    const txt = JSON.stringify(j?.error ?? {});
+    if (/API_KEY_INVALID|API key not valid|API key expired/i.test(txt)) return "bad";
     return "unknown";
   } catch { return "unknown"; }
 }
