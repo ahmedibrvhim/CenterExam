@@ -57,7 +57,7 @@ function OrderStep({ onDone, fixed }: { onDone?: () => void; fixed: string | nul
           <span className="plan-tag">خصم {off}%</span>
           <b>كل المواد</b>
           <span className="plan-price"><s className="plan-was">{LIST_PRICE.all}</s> {PRICE.all} <small>{CURRENCY} / شهر</small></span>
-          <small>{SUBJECT_COUNT} مواد × {UNIT_PRICE} − {off}%</small>
+          <small>{SUBJECT_COUNT} مواد · وفّر {off}%</small>
         </button>
       </div>
 

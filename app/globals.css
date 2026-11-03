@@ -695,3 +695,28 @@ button.plan-card { cursor: pointer; font: inherit; color: inherit; transition: b
 }
 
 .gsi-box { display: flex; justify-content: center; min-height: 44px; width: 100%; color-scheme: normal; }
+
+/* ---- «اشتراكي» / renew sheet: tidy on phones ---- */
+.sub-modal { padding: 22px 18px calc(20px + env(safe-area-inset-bottom)); overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.sub-modal h2 { padding-inline-end: 46px; line-height: 1.4; }
+.sub-x { inset-inline-start: auto; inset-inline-end: 12px; top: 14px; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; background: rgba(255,255,255,.07); }
+.sub-modal .hint, .sub-flow .hint { margin-top: 0; line-height: 1.75; }
+.sub-modal > .hint:last-child { margin-top: 14px; }
+.sub-modal h3 { margin: 16px 0 2px; }
+.sub-list li { gap: 10px; flex-wrap: wrap; }
+.plan-price { display: flex; align-items: baseline; justify-content: center; gap: 6px; flex-wrap: wrap; line-height: 1.2; }
+.plan-card b { font-size: 14.5px; }
+.order-sum > div { flex-wrap: wrap; }
+.order-sum b { text-align: end; }
+.sub-flow .btn-primary { margin-top: 2px; }
+.sub-flow .pay-num { flex-wrap: wrap; }
+.sub-flow .pay-num code { font-size: clamp(16px, 5.4vw, 20px); letter-spacing: 1px; }
+@media (max-width: 700px) {
+  .sub-modal { width: 100%; max-height: 92dvh; border-radius: var(--r-lg) var(--r-lg) 0 0; border-bottom: 0; }
+  .plan-pick { gap: 8px; }
+  .plan-card { padding: 14px 8px; }
+  .plan-price { font-size: 22px; }
+  .plan-price small { font-size: 11px; }
+}
+@media (max-width: 380px) { .plan-pick { grid-template-columns: 1fr; } }
+.sub-x { border: 0; cursor: pointer; } .sub-x:focus-visible { outline: 2px solid var(--accent-2); }

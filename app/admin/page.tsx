@@ -142,6 +142,7 @@ function Orders({ d, reload, flash }: { d: Overview; reload: () => void; flash: 
                 <div><dt>اشتراكه الحالي</dt><dd>{current.length ? current.map((e) => `${entLabel(e.subject)} (${daysLeft(e, d.now)} يوم)`).join("، ") : "لا يوجد"}</dd></div>
                 {c && <div><dt>الكود</dt><dd><code dir="ltr">{formatCode(c.id)}</code><small>{c.status === "used" ? `استُخدم ${fmtTime(c.usedAt)}` : c.status === "revoked" ? "ملغي" : `أُنشئ ${fmtTime(c.createdAt)}`}</small></dd></div>}
                 {o.status === "activated" && <div><dt>تاريخ التفعيل</dt><dd>{fmtTime(o.activatedAt)}</dd></div>}
+                {o.status === "activated" && (() => { const e = (u?.entitlements ?? []).find((x) => x.subject === o.subject); if (!e) return null; const on = isActive(e, d.now); return <div><dt>حالة الاشتراك</dt><dd><span className={`pill ${on ? "ok" : "bad"}`}>{on ? `ساري · ${daysLeft(e, d.now)} يوم` : "انتهى"}</span><small>{on ? "حتى" : "في"} {fmt(e.expiresAt)}</small></dd></div>; })()}
               </dl>
               <div className="ord-actions">
                 {o.status === "pending" && <button className="btn-primary" disabled={busy === o.id} onClick={() => makeCode(o)}>{busy === o.id ? "…" : "إنشاء كود"}</button>}
@@ -162,9 +163,11 @@ function Orders({ d, reload, flash }: { d: Overview; reload: () => void; flash: 
 }
 
 function Codes({ d, reload, flash }: { d: Overview; reload: () => void; flash: (m: string) => void }) {
-  const [f, setF] = useState<"all" | CodeDoc["status"]>("all");
+  const [f, setF] = useState<"all" | "expired" | "running" | CodeDoc["status"]>("all");
+  // when the subscription this code gave ends (the owner's live entitlement if it still carries this code, else use date + days)
+  const endOf = (c: CodeDoc) => { if (c.status !== "used") return 0; const e = d.users.find((u) => u.uid === c.usedBy)?.entitlements.find((x) => x.code === c.id); return e?.expiresAt ?? (c.usedAt ?? 0) + c.days * 86_400_000; };
   const [q, setQ] = useState("");
-  const rows = useMemo(() => d.codes.filter((c) => (f === "all" || c.status === f) && (!q || `${c.id} ${c.customerName} ${c.customerPhone} ${c.usedByName ?? ""} ${c.usedByPhone ?? ""} ${c.usedByEmail ?? ""}`.toLowerCase().includes(q.toLowerCase().replace(/-/g, "")))), [d.codes, f, q]);
+  const rows = useMemo(() => d.codes.filter((c) => (f === "all" || (f === "expired" ? c.status === "used" && endOf(c) <= d.now : f === "running" ? c.status === "used" && endOf(c) > d.now : c.status === f)) && (!q || `${c.id} ${c.customerName} ${c.customerPhone} ${c.usedByName ?? ""} ${c.usedByPhone ?? ""} ${c.usedByEmail ?? ""}`.toLowerCase().includes(q.toLowerCase().replace(/-/g, "")))), [d.codes, f, q]);
   const act = async (code: string, action: "revoke" | "restore" | "delete") => {
     if (action === "delete" && !confirm("حذف الكود نهائيًا؟")) return;
     const { ok, data } = await api("/api/admin/codes", "PATCH", { code, action });
@@ -176,11 +179,11 @@ function Codes({ d, reload, flash }: { d: Overview; reload: () => void; flash: (
       <div className="filters">
         <input className="input" placeholder="بحث بالكود أو الاسم أو الهاتف" value={q} onChange={(e) => setQ(e.target.value)} />
         <select className="input" value={f} onChange={(e) => setF(e.target.value as any)}>
-          <option value="all">كل الحالات</option><option value="unused">غير مستخدم</option><option value="used">مستخدم</option><option value="revoked">ملغي</option>
+          <option value="all">كل الحالات</option><option value="unused">غير مستخدم</option><option value="used">مستخدم</option><option value="running">اشتراك ساري</option><option value="expired">اشتراك منتهي</option><option value="revoked">ملغي</option>
         </select>
       </div>
       <div className="tbl-wrap"><table className="tbl stack">
-        <thead><tr><th>الكود</th><th>الاشتراك</th><th>العميل</th><th>الحالة</th><th>أُنشئ</th><th>استخدمه</th><th></th></tr></thead>
+        <thead><tr><th>الكود</th><th>الاشتراك</th><th>العميل</th><th>الحالة</th><th>أُنشئ</th><th>استخدمه</th><th>الصلاحية</th><th></th></tr></thead>
         <tbody>
           {rows.map((c) => (
             <tr key={c.id}>
@@ -190,6 +193,7 @@ function Codes({ d, reload, flash }: { d: Overview; reload: () => void; flash: (
               <td data-label="الحالة"><span className={`pill ${c.status === "used" ? "ok" : c.status === "revoked" ? "bad" : ""}`}>{STATUS[c.status]}</span></td>
               <td data-label="أُنشئ">{fmt(c.createdAt)}</td>
               <td data-label="استخدمه">{c.status === "used" ? <>{c.usedByName}<small dir="ltr">{c.usedByPhone}</small><small>{fmt(c.usedAt)}</small></> : "—"}</td>
+              <td data-label="الصلاحية">{c.status === "used" ? (endOf(c) > d.now ? <><span className="pill ok">ساري · {Math.ceil((endOf(c) - d.now) / 86_400_000)} يوم</span><small>حتى {fmt(endOf(c))}</small></> : <><span className="pill bad">انتهى</span><small>في {fmt(endOf(c))}</small></>) : c.status === "revoked" ? <span className="pill bad">ملغي</span> : <span className="pill warn">لم يُفعَّل بعد</span>}</td>
               <td className="acts">
                 <button className="btn-ghost" onClick={() => { copy(formatCode(c.id)); flash("تم النسخ"); }}>نسخ</button>
                 {c.status === "unused" && <button className="btn-ghost" onClick={() => act(c.id, "revoke")}>إلغاء</button>}
@@ -198,7 +202,7 @@ function Codes({ d, reload, flash }: { d: Overview; reload: () => void; flash: (
               </td>
             </tr>
           ))}
-          {!rows.length && <tr><td colSpan={7} className="empty">لا توجد أكواد</td></tr>}
+          {!rows.length && <tr><td colSpan={8} className="empty">لا توجد أكواد</td></tr>}
         </tbody>
       </table></div>
     </section>
