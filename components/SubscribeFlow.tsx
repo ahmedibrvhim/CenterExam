@@ -9,7 +9,7 @@ import CodeForm from "@/components/CodeForm";
 
 // Two gateways, one after the other:
 //   1) OrderStep   - teacher / center name + phone + the term (monthly / yearly / forever / free trial) + the subscription (subject or all) with its price.
-//                    Paid terms: "إنشاء الاشتراك" places an order. Free trial: starts at once (1 hour, all subjects, one time per user), no order.
+//                    Paid terms: "إنشاء الاشتراك" places an order. Free trial: starts at once (ends after the first PDF, all subjects, one time per user), no order.
 //   2) PaymentStep - how to pay + the receipt on WhatsApp + the box where the code (sent back by the admin) is entered.
 // The step shown is decided by the server: an open order => PaymentStep.
 export default function SubscribeFlow({ onDone, subject }: { onDone?: () => void; subject?: string | null }) {
@@ -19,7 +19,7 @@ export default function SubscribeFlow({ onDone, subject }: { onDone?: () => void
 
 const money = (n: number) => `${n} ${CURRENCY}`;
 
-const TERM_NOTE: Record<Term, string> = { month: "30 يومًا", year: "365 يومًا", forever: "بدون انتهاء", trial: "ساعة واحدة" };
+const TERM_NOTE: Record<Term, string> = { month: "30 يومًا", year: "365 يومًا", forever: "بدون انتهاء", trial: "ملف PDF واحد" };
 const TERM_ICON: Record<Term, string> = { month: "📅", year: "🗓️", forever: "♾️", trial: "🎁" };
 
 function OrderStep({ onDone, fixed }: { onDone?: () => void; fixed: string | null }) {
@@ -73,10 +73,10 @@ function OrderStep({ onDone, fixed }: { onDone?: () => void; fixed: string | nul
       {trial ? (
         <>
           <div className="trial-box">
-            <b>🎁 جرّب كل المواد مجانًا لمدة ساعة</b>
+            <b>🎁 جرّب مجانًا: ملف PDF واحد</b>
             <ul>
               <li>تفتح <b>كل المواد</b> ({SUBJECT_COUNT} مواد) بدون دفع ولا كود.</li>
-              <li>مدتها <b>ساعة واحدة</b> من لحظة الضغط على «ابدأ التجربة».</li>
+              <li>تنتهي بعد تنزيل <b>أول ملف PDF</b> (ملف واحد فقط من أي مادة).</li>
               <li><b>مرة واحدة فقط</b> لكل مستخدم — بعدها تشترك شهريًا أو سنويًا أو دائمًا.</li>
             </ul>
           </div>

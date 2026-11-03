@@ -9,6 +9,7 @@ import { balanceCheck } from "@/lib/chem";
 import { hintsFor, norm } from "@/lib/analyze";
 import { ApiError, assertSubjectAccess, requireUser } from "@/lib/server/admin";
 import { getUserKey } from "@/lib/server/userKey";
+import { chargeTrialBatch } from "@/lib/server/trial";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -303,6 +304,7 @@ export async function POST(req: Request) {
     const u = await requireUser(req);
     subjectReq = String(((await req.clone().json()) as { subject?: string })?.subject ?? "");
     await assertSubjectAccess(u, subjectReq);
+    await chargeTrialBatch(u); // free-trial users have a limited number of AI batches
     apiKey = (await getUserKey(u))?.key ?? null; // THIS teacher's own Gemini key
   } catch (e) {
     if (e instanceof ApiError) return NextResponse.json({ code: e.code, error: e.message }, { status: e.status });

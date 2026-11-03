@@ -14,7 +14,7 @@ export const isPaidTerm = (t: unknown): t is PaidTerm => PAID_TERMS.includes(t a
 export const termOf = (x: { term?: Term } | undefined | null): Term => x?.term ?? "month"; // old orders / codes / rights have no term = monthly
 export const TERM_LABEL: Record<Term, string> = { month: "شهري", year: "سنوي", forever: "دائم", trial: "تجربة مجانية" };
 export const TERM_DAYS: Record<Term, number> = { month: 30, year: 365, forever: 0, trial: 0 };
-export const TERM_LENGTH: Record<Term, string> = { month: "30 يومًا", year: "سنة كاملة (365 يومًا)", forever: "دائم — بدون تاريخ انتهاء", trial: "ساعة واحدة" };
+export const TERM_LENGTH: Record<Term, string> = { month: "30 يومًا", year: "سنة كاملة (365 يومًا)", forever: "دائم — بدون تاريخ انتهاء", trial: "ملف PDF واحد" };
 export const TERM_UNIT: Record<Term, string> = { month: "/ شهر", year: "/ سنة", forever: "مرة واحدة", trial: "مجانًا" };
 
 // Pricing (EGP). One subject / all subjects, per term. "All subjects" is cheaper than buying every subject one by one.
@@ -30,7 +30,7 @@ export const priceOf = (term: Term, plan: Plan) => (isPaidTerm(term) ? PRICES[te
 export const listPriceOf = (term: Term, plan: Plan) => (isPaidTerm(term) ? (plan === "all" ? SUBJECT_COUNT * PRICES[term].single : PRICES[term].single) : 0);
 export const discountPct = (term: Term) => (isPaidTerm(term) ? Math.round((1 - priceOf(term, "all") / listPriceOf(term, "all")) * 100) : 0);
 
-export const TRIAL_MS = 3_600_000;             // free trial: one hour, all subjects, once per person
+export const TRIAL_MS = 7 * 86_400_000;        // free trial: ends at the FIRST PDF download (all subjects, once per person); this is only a safety window for abandoned trials
 export const FOREVER_AT = 253_402_300_799_000; // "no end": 31 Dec 9999. expiresAt of a forever right, so `expiresAt > now` stays true
 export const CURRENCY = "جنيه";
 export const DAY_MS = 86_400_000;
@@ -59,11 +59,11 @@ export const arMinutes = (n: number) => (n <= 1 ? "أقل من دقيقة" : n =
 // "دائم" / "42 دقيقة" / "12 يومًا": what is left of a right, for pills and the header
 export function leftText(e: Entitlement, now: number): string {
   if (isForever(e)) return "دائم";
-  if (isTrial(e)) return arMinutes(Math.max(0, Math.ceil((e.expiresAt - now) / 60_000)));
+  if (isTrial(e)) return "ملف PDF واحد";
   return arDays(daysLeft(e, now));
 }
 // close to its end? (trial: last 10 minutes; timed: last 3 days; forever: never)
-export const isLow = (e: Entitlement, now: number) => !isForever(e) && (isTrial(e) ? e.expiresAt - now <= 600_000 : daysLeft(e, now) <= 3);
+export const isLow = (e: Entitlement, now: number) => !isForever(e) && (isTrial(e) ? false : daysLeft(e, now) <= 3);
 
 // Gives the right for `key` according to `term`.
 //   forever -> never ends (replaces anything on that key)

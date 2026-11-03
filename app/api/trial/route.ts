@@ -4,7 +4,7 @@ import { cleanName, cleanPhone, grantTerm, isTrial, TRIAL_MS, type Entitlement }
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Free trial: ONE time per person, 1 hour, ALL subjects. Instant (no order, no code, no payment).
+// Free trial: ONE time per person, ALL subjects, ends after the FIRST PDF download (see lib/server/trial.ts). Instant (no order, no code, no payment).
 // "Once" is enforced inside a transaction against two places: the user record (trialUsedAt) and trials/<e-mail>, which survives a deleted / recreated user record.
 export async function POST(req: Request) {
   return handle(async () => {
@@ -26,7 +26,7 @@ export async function POST(req: Request) {
       if (ents.some((e) => !isTrial(e))) return { err: [409, "not_new", "التجربة المجانية متاحة للمستخدمين الجدد فقط."] as const };
       const now = Date.now();
       const list = grantTerm(ents, "all", "trial", "TRIAL", now);
-      tx.set(userRef, { uid: u.uid, email: u.email, displayName: u.name, photoURL: u.picture, name, phone, entitlements: list, subscribed: true, trialUsedAt: now, updatedAt: now }, { merge: true });
+      tx.set(userRef, { uid: u.uid, email: u.email, displayName: u.name, photoURL: u.picture, name, phone, entitlements: list, subscribed: true, trialUsedAt: now, trialBatches: 0, updatedAt: now }, { merge: true });
       tx.set(trialRef, { uid: u.uid, email: u.email, at: now });
       return { ok: true as const, entitlements: list, now, endsAt: now + TRIAL_MS, profile: { name, phone } };
     });

@@ -10,6 +10,7 @@ import Library from "@/components/Library";
 import ReviewPanel, { Draft, Slot } from "@/components/ReviewPanel";
 import { Chunk, Exam, OcrError, Q, chunkPages, dealSets, exportExam, extractPages, isBlankPage, ocrPages, pickChunks, shuffle } from "@/exam";
 import { listExams, removeExam, saveExam } from "@/lib/db";
+import { isTrial } from "@/lib/plans";
 import { Fail, streamBatch } from "@/lib/ai";
 import { detectFromRanges } from "@/lib/detect";
 import { extractSignals, type Signals } from "@/lib/analyze";
@@ -86,7 +87,7 @@ export default function Home() {
   const [title, setTitle] = useState("");
   const [grade, setGrade] = useState(""); // total mark printed on the exam sheet (optional)
   // how many questions of each type ONE copy of the exam has (text, so typing "30" is not interrupted; clamped only when used)
-  const { can } = useAccess();
+  const { can, active, isAdmin, refresh } = useAccess();
   const [subjectId, setSubjectId] = useState<SubjectId | null | undefined>(undefined); // undefined = still reading the saved choice
   const subject = getSubject(subjectId);
   const [forced, setForced] = useState<Kind[]>([]);      // question types the teacher switched on although the pages do not seem to fit
@@ -652,11 +653,21 @@ export default function Home() {
     }
   };
 
+  // Free trial = ONE PDF: after the first successful PDF the trial ends and the teacher goes back to the subjects screen to subscribe.
+  const finishTrial = async () => {
+    try { await authFetch("/api/trial/finish", { method: "POST", cache: "no-store" }); } catch {}
+    await refresh();
+    try { sessionStorage.removeItem(SUBJECT_KEY); } catch {}
+    setSubjectId(null);
+    notify("انتهت التجربة المجانية بعد أول ملف PDF. اختر مادة للاشتراك والمتابعة.", "info");
+  };
   const download = async (e: Exam, v: string, key: boolean) => {
+    const trialOnly = !isAdmin && active.length > 0 && active.every(isTrial);
     notify("جارٍ تجهيز ملف PDF…", "info");
     try {
       const how = await exportExam(e, v, key);
       notify(how === "sheet" ? "الملف جاهز — اضغط «مشاركة / حفظ الملف»" : "تم تنزيل ملف PDF", "success");
+      if (trialOnly) await finishTrial();
     } catch (err) { console.error("pdf failed", err); notify("تعذّر تجهيز ملف PDF", "error"); }
   };
   const del = async (id: string) => {
