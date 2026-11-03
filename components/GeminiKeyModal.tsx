@@ -1,5 +1,6 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { authFetch } from "@/lib/authFetch";
 
 // Each teacher pastes THEIR OWN free Gemini key here. It is saved encrypted on the server and never shown again (only the last 4 characters).
@@ -10,6 +11,9 @@ export default function GeminiKeyModal({ onClose }: { onClose: () => void }) {
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [mounted, setMounted] = useState(false);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
 
   const call = useCallback(async (method: "GET" | "POST" | "DELETE", body?: object) => {
     try {
@@ -20,11 +24,12 @@ export default function GeminiKeyModal({ onClose }: { onClose: () => void }) {
   }, []);
 
   useEffect(() => {
+    setMounted(true);
     call("GET").then(({ ok, d }) => { if (ok) { setHasOwn(!!d.hasOwn); setLast4(d.last4 || ""); } }).finally(() => setLoading(false));
-    const k = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const k = (e: KeyboardEvent) => { if (e.key === "Escape") closeRef.current(); };
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
-  }, [call, onClose]);
+  }, [call]);
 
   const changed = () => window.dispatchEvent(new Event("gemini-key-changed"));
 
@@ -44,7 +49,9 @@ export default function GeminiKeyModal({ onClose }: { onClose: () => void }) {
     setHasOwn(false); setLast4(""); setMsg({ ok: true, text: "تم حذف المفتاح." }); changed();
   };
 
-  return (
+  if (!mounted) return null;
+  // Rendered in <body>, NOT inside the header: the header has backdrop-filter, which traps "position: fixed" children inside the nav bar and breaks the layout.
+  return createPortal(
     <div className="modal-back" role="dialog" aria-modal="true" aria-label="مفتاح الذكاء الاصطناعي" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="sub-modal">
         <button type="button" className="sub-x" onClick={onClose} aria-label="إغلاق">✕</button>
@@ -72,6 +79,7 @@ export default function GeminiKeyModal({ onClose }: { onClose: () => void }) {
         </div>
         <p className="hint">المفتاح يُحفظ مشفّرًا على الخادم ولا يظهر لأحد، ولا يُرسل إلى الأجهزة الأخرى.</p>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

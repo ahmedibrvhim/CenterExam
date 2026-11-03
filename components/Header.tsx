@@ -50,7 +50,7 @@ export default function Header({ subject, onChangeSubject }: { subject?: Subject
           <button type="button" className={`sub-status ${sub.cls}`} onClick={() => openPlans(null, "details")} title={detail} aria-label={`حالة الاشتراك: ${sub.text} — اضغط لعرض التفاصيل`}>
             <span className="sub-dot" aria-hidden="true" />{sub.text}
           </button>
-          {user && <button type="button" className="btn-ghost" onClick={() => setKeyOpen(true)}>🔑 مفتاح الذكاء الاصطناعي</button>}
+          {user && <button type="button" className="btn-ghost" onClick={() => setKeyOpen(true)} title="مفتاح Gemini الخاص بك" style={{ whiteSpace: "nowrap" }}>🔑 مفتاح Gemini</button>}
           {isAdmin && <a href="/admin" className="btn-ghost hdr-admin">الإدارة</a>}
         </div>
       </div>

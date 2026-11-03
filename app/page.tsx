@@ -748,7 +748,8 @@ export default function Home() {
                   <span className="dot" />
                   <div>
                     <strong>أضف مفتاح Gemini الخاص بك لتوليد الأسئلة</strong>
-                    <small>المفتاح مجاني ويستغرق دقيقة. <button type="button" className="btn-ghost" onClick={() => window.dispatchEvent(new Event("open-gemini-key"))}>🔑 إضافة المفتاح</button></small>
+                    <small>المفتاح مجاني ويستغرق دقيقة.</small>
+                    <button type="button" className="btn-ghost" style={{ marginTop: 8 }} onClick={() => window.dispatchEvent(new Event("open-gemini-key"))}>🔑 إضافة المفتاح</button>
                   </div>
                 </div>
               ) : <AiStatus limit={limit} usage={usage} shared={shared} />}
