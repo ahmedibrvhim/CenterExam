@@ -1,10 +1,10 @@
 "use client";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { onAuthStateChanged, signInWithPopup, signInWithRedirect, getRedirectResult, signOut as fbSignOut, type User } from "firebase/auth";
+import { onAuthStateChanged, signInWithPopup, signInWithRedirect, signInWithCredential, GoogleAuthProvider, getRedirectResult, signOut as fbSignOut, type User } from "firebase/auth";
 import { firebaseConfigured, getFirebaseAuth, googleProvider } from "@/lib/firebase";
 
 type Status = "loading" | "signedOut" | "signedIn";
-type Ctx = { user: User | null; status: Status; busy: boolean; error: string; configured: boolean; signIn: () => Promise<void>; signOut: () => Promise<void> };
+type Ctx = { user: User | null; status: Status; busy: boolean; error: string; configured: boolean; signIn: () => Promise<void>; signInWithGoogleToken: (idToken: string) => Promise<void>; signOut: () => Promise<void> };
 
 const AuthCtx = createContext<Ctx | null>(null);
 export const useAuth = () => {
@@ -58,6 +58,15 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Google's own button hands us an ID token directly: no redirect, no popup, no sessionStorage round trip (the thing iOS Safari loses).
+  const signInWithGoogleToken = useCallback(async (idToken: string) => {
+    const auth = getFirebaseAuth();
+    if (!auth) return;
+    setBusy(true); setError("");
+    try { await signInWithCredential(auth, GoogleAuthProvider.credential(idToken)); }
+    catch (e: any) { setError(explain(e?.code || "")); setBusy(false); }
+  }, []);
+
   const signOut = useCallback(async () => {
     const auth = getFirebaseAuth();
     if (auth) await fbSignOut(auth);
@@ -65,6 +74,6 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     document.documentElement.removeAttribute("data-splash");
   }, []);
 
-  const value = useMemo(() => ({ user, status, busy, error, configured: firebaseConfigured, signIn, signOut }), [user, status, busy, error, signIn, signOut]);
+  const value = useMemo(() => ({ user, status, busy, error, configured: firebaseConfigured, signIn, signInWithGoogleToken, signOut }), [user, status, busy, error, signIn, signInWithGoogleToken, signOut]);
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;
 }

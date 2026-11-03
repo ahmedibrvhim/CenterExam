@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import Emblem from "@/components/Emblem";
 import ThemePicker from "@/components/ThemePicker";
 import Splash from "@/components/Splash";
@@ -21,8 +21,36 @@ function GoogleG() {
   );
 }
 
+const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
+
+// Google's official sign-in button (Google Identity Services). Works on iPhone/Safari because nothing is stored between pages.
+function GoogleButton({ onToken }: { onToken: (t: string) => void }) {
+  const box = useRef<HTMLDivElement>(null);
+  const cb = useRef(onToken); cb.current = onToken;
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let dead = false;
+    const draw = () => {
+      const g = (window as any).google?.accounts?.id;
+      if (dead || !g || !box.current) return;
+      g.initialize({ client_id: GOOGLE_CLIENT_ID, callback: (r: { credential?: string }) => { if (r.credential) cb.current(r.credential); }, ux_mode: "popup", use_fedcm_for_prompt: false });
+      box.current.innerHTML = "";
+      g.renderButton(box.current, { type: "standard", theme: "filled_black", size: "large", shape: "pill", text: "signin_with", locale: "ar", width: Math.min(320, box.current.clientWidth || 320) });
+    };
+    if ((window as any).google?.accounts?.id) draw();
+    else {
+      const s = document.createElement("script");
+      s.src = "https://accounts.google.com/gsi/client"; s.async = true; s.defer = true;
+      s.onload = draw; s.onerror = () => setFailed(true);
+      document.head.appendChild(s);
+    }
+    return () => { dead = true; };
+  }, []);
+  return <>{failed ? <p className="login-err" role="alert">تعذّر تحميل زر Google. تحقّق من الإنترنت وأعد تحميل الصفحة.</p> : <div ref={box} className="gsi-box" />}</>;
+}
+
 function LoginPage() {
-  const { signIn, busy, error, configured } = useAuth();
+  const { signIn, signInWithGoogleToken, busy, error, configured } = useAuth();
   const [webview, setWebview] = useState(false);
   const [copied, setCopied] = useState(false);
   useEffect(() => { setWebview(inAppBrowser(navigator.userAgent)); }, []);
@@ -46,6 +74,8 @@ function LoginPage() {
             <span>Google لا تسمح بتسجيل الدخول داخل متصفح التطبيقات (فيسبوك / واتساب / إنستغرام). افتح الرابط في Chrome أو Safari.</span>
             <button type="button" className="btn-ghost" onClick={copyLink}>{copied ? "تم النسخ ✓" : "نسخ الرابط"}</button>
           </div>
+        ) : GOOGLE_CLIENT_ID ? (
+          <>{busy ? <span className="login-spin" aria-hidden="true" /> : <GoogleButton onToken={signInWithGoogleToken} />}</>
         ) : (
           <button type="button" className="google-btn" onClick={signIn} disabled={busy || !configured} aria-busy={busy}>
             {busy ? <span className="login-spin" aria-hidden="true" /> : <GoogleG />}

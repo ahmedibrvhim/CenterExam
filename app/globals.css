@@ -693,3 +693,5 @@ button.plan-card { cursor: pointer; font: inherit; color: inherit; transition: b
   .tbl.stack .acts::before { content: none; }
   .tbl.stack .ent-row { padding: 4px 0; }
 }
+
+.gsi-box { display: flex; justify-content: center; min-height: 44px; width: 100%; color-scheme: normal; }
