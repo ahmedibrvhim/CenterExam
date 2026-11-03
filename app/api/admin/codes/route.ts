@@ -21,7 +21,7 @@ export async function POST(req: Request) {
     for (let attempt = 0; attempt < 3; attempt++) {
       const now = Date.now();
       const doc: CodeDoc = {
-        id: newId(), plan: order.plan, subject: order.subject, price: order.price, days: order.days,
+        id: newId(), plan: order.plan, term: order.term ?? "month", subject: order.subject, price: order.price, days: order.days,
         customerName: order.name, customerPhone: order.phone, note: "",
         status: "unused", createdAt: now, createdBy: admin.email, orderId: order.id,
       };

@@ -4,10 +4,7 @@ import Emblem from "@/components/Emblem";
 import { useAuth } from "@/components/AuthProvider";
 import { useAccess } from "@/components/AccessProvider";
 import { getSubject, type SubjectId } from "@/lib/subjects";
-import { daysLeft, entLabel } from "@/lib/plans";
-
-// Arabic day counts: يوم واحد / يومان / 3-10 أيام / 11+ يومًا
-const days = (n: number) => (n <= 0 ? "ينتهي اليوم" : n === 1 ? "يوم واحد" : n === 2 ? "يومان" : n <= 10 ? `${n} أيام` : `${n} يومًا`);
+import { entLabel, isForever, isLow, isTrial, leftText } from "@/lib/plans";
 
 export default function Header({ subject, onChangeSubject }: { subject?: SubjectId | null; onChangeSubject?: () => void }) {
   const s = getSubject(subject);
@@ -17,12 +14,11 @@ export default function Header({ subject, onChangeSubject }: { subject?: Subject
   // Subscription state shown in the bar: which subject(s) are open and how long is left.
   const main = active.find((e) => e.subject === "all") ?? [...active].sort((a, b) => b.expiresAt - a.expiresAt)[0];
   const extra = main && main.subject !== "all" ? active.length - 1 : 0;
-  const left = main ? daysLeft(main, now) : 0;
   const sub = isAdmin ? { cls: "ok", text: "👑 مدير" }
-    : main ? { cls: left <= 3 ? "warn" : "ok", text: `${entLabel(main.subject)}${extra ? ` +${extra}` : ""} · ${days(left)}` }
+    : main ? { cls: isLow(main, now) ? "warn" : "ok", text: `${isTrial(main) ? "تجربة مجانية · " : ""}${entLabel(main.subject)}${extra ? ` +${extra}` : ""} · ${isForever(main) ? "دائم ∞" : leftText(main, now)}` }
     : order ? { cls: "warn", text: "طلب قيد التفعيل" }
     : { cls: "bad", text: "غير مشترك" };
-  const detail = active.length ? active.map((e) => `${entLabel(e.subject)}: متبقٍّ ${days(daysLeft(e, now))}`).join("\n") : "لا يوجد اشتراك فعّال";
+  const detail = active.length ? active.map((e) => `${entLabel(e.subject)}${isTrial(e) ? " (تجربة)" : ""}: ${isForever(e) ? "دائم" : `متبقٍّ ${leftText(e, now)}`}`).join("\n") : "لا يوجد اشتراك فعّال";
   return (
     <header className="site-header">
       <div className="site-header-inner">

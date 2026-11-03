@@ -1,21 +1,22 @@
 "use client";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { authFetch } from "@/lib/authFetch";
-import { activeOf, covers, type Entitlement, type OrderDoc, type Plan } from "@/lib/plans";
+import { activeOf, covers, isTrial, type Entitlement, type OrderDoc, type PaidTerm, type Plan } from "@/lib/plans";
 import { useNow } from "@/components/useNow";
 import SubscriptionModal from "@/components/SubscriptionModal";
 
 type Profile = { name: string; phone: string };
 type Status = "loading" | "ready" | "error";
 type Ctx = {
-  status: Status; error: string; everSubscribed: boolean; profile: Profile | null; entitlements: Entitlement[]; isAdmin: boolean; now: number;
+  status: Status; error: string; everSubscribed: boolean; trialUsed: boolean; trialAvailable: boolean; profile: Profile | null; entitlements: Entitlement[]; isAdmin: boolean; now: number;
   order: OrderDoc | null;                      // my open order (placed, not activated yet) - drives the payment gateway
   active: Entitlement[];                       // not expired yet
   can: (subject: string) => boolean;           // may this person use the subject right now (admins: always)
   refresh: () => Promise<void>;
   saveProfile: (name: string, phone: string) => Promise<string>;   // returns "" or an error message
   redeem: (code: string) => Promise<string>;                       // returns "" or an error message
-  createOrder: (o: { name: string; phone: string; plan: Plan; subject?: string }) => Promise<string>;   // "make subscription": returns "" or an error message
+  createOrder: (o: { name: string; phone: string; plan: Plan; term: PaidTerm; subject?: string }) => Promise<string>;   // "make subscription": returns "" or an error message
+  startTrial: (name: string, phone: string) => Promise<string>;   // free 1-hour trial of all subjects, once per user: returns "" or an error message
   cancelOrder: () => Promise<string>;
   plansOpen: boolean; plansSubject: string | null; openPlans: (subject?: string | null) => void; closePlans: () => void;
   lapsed: (subject: string) => boolean;        // had this subject (or all) before and it has ended
@@ -42,6 +43,7 @@ export default function AccessProvider({ children }: { children: ReactNode }) {
   const [plansOpen, setPlansOpen] = useState(false);
   const [plansSubject, setPlansSubject] = useState<string | null>(null);
   const [ever, setEver] = useState(false);
+  const [trialUsed, setTrialUsed] = useState(false);
   const tick = useNow(30_000); // subscriptions end by themselves while the page is open
   const [skew, setSkew] = useState(0); // server clock - browser clock
   // read the clock again whenever the data changes (a stale 30s-old "now" made a fresh 30-day code show 31)
@@ -50,7 +52,7 @@ export default function AccessProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     const { ok, data } = await call("/api/me");
     if (!ok) { setError(data.error || "تعذّر تحميل بيانات حسابك."); setStatus((s) => (s === "ready" ? s : "error")); return; }
-    setProfile(data.profile); setEnts(data.entitlements ?? []); setAdmin(!!data.isAdmin); setEver(!!data.everSubscribed); setOrder(data.order ?? null); if (data.now) setSkew(data.now - Date.now()); setError(""); setStatus("ready");
+    setProfile(data.profile); setEnts(data.entitlements ?? []); setAdmin(!!data.isAdmin); setEver(!!data.everSubscribed); setTrialUsed(!!data.trialUsed); setOrder(data.order ?? null); if (data.now) setSkew(data.now - Date.now()); setError(""); setStatus("ready");
   }, []);
 
   useEffect(() => {
@@ -72,7 +74,14 @@ export default function AccessProvider({ children }: { children: ReactNode }) {
     if (data.now) setSkew(data.now - Date.now()); setEnts(data.entitlements ?? []); setEver(true); setOrder(null); refresh(); return "";
   }, [refresh]);
 
-  const createOrder = useCallback(async (o: { name: string; phone: string; plan: Plan; subject?: string }) => {
+  const startTrial = useCallback(async (name: string, phone: string) => {
+    const { ok, data } = await call("/api/trial", { name, phone });
+    if (!ok) { if (data.code === "trial_used") setTrialUsed(true); return data.error || "تعذّر بدء التجربة المجانية."; }
+    if (data.now) setSkew(data.now - Date.now());
+    setProfile(data.profile); setEnts(data.entitlements ?? []); setEver(true); setTrialUsed(true); refresh(); return "";
+  }, [refresh]);
+
+  const createOrder = useCallback(async (o: { name: string; phone: string; plan: Plan; term: PaidTerm; subject?: string }) => {
     const { ok, data } = await call("/api/orders", o);
     if (!ok) return data.error || "تعذّر إنشاء الطلب.";
     setProfile(data.profile); setOrder(data.order); return "";
@@ -89,13 +98,14 @@ export default function AccessProvider({ children }: { children: ReactNode }) {
   }, [order]);
 
   const value = useMemo<Ctx>(() => ({
-    status, error, everSubscribed: ever || entitlements.length > 0, profile, entitlements, isAdmin, now, order,
+    status, error, everSubscribed: ever || entitlements.length > 0, trialUsed,
+    trialAvailable: !trialUsed && !entitlements.some((e) => !isTrial(e)), profile, entitlements, isAdmin, now, order,
     active: activeOf(entitlements, now),
     can: (subject: string) => isAdmin || covers(entitlements, subject, now),
-    refresh, saveProfile, redeem, createOrder, cancelOrder,
+    refresh, saveProfile, redeem, createOrder, startTrial, cancelOrder,
     plansOpen, plansSubject, openPlans: (s?: string | null) => { setPlansSubject(s ?? null); setPlansOpen(true); }, closePlans: () => setPlansOpen(false),
     lapsed: (subject: string) => entitlements.some((e) => (e.subject === "all" || e.subject === subject) && e.expiresAt <= now),
-  }), [status, error, profile, entitlements, isAdmin, now, order, refresh, saveProfile, redeem, createOrder, cancelOrder, plansOpen, plansSubject, ever]);
+  }), [status, error, profile, entitlements, isAdmin, now, order, refresh, saveProfile, redeem, createOrder, startTrial, cancelOrder, plansOpen, plansSubject, ever, trialUsed]);
 
   return <C.Provider value={value}>{children}{plansOpen && status === "ready" && <SubscriptionModal />}</C.Provider>;
 }

@@ -1,6 +1,6 @@
 import { randomInt } from "crypto";
 import { ApiError, db, handle, readJson, requireUser } from "@/lib/server/admin";
-import { CODE_ALPHABET, LIST_PRICE, PLAN_DAYS, PRICE, cleanName, cleanPhone, isOpenOrder, type EntKey, type OrderDoc, type Plan } from "@/lib/plans";
+import { CODE_ALPHABET, TERM_DAYS, cleanName, cleanPhone, isOpenOrder, isPaidTerm, listPriceOf, priceOf, type EntKey, type OrderDoc, type PaidTerm, type Plan } from "@/lib/plans";
 import { getSubject } from "@/lib/subjects";
 
 export const runtime = "nodejs";
@@ -13,13 +13,15 @@ export async function POST(req: Request) {
   return handle(async () => {
     const u = await requireUser(req);
     if (u.isAdmin) throw new ApiError(403, "admin_no_sub", "حساب المدير مفتوح دائمًا ولا يحتاج اشتراكًا.");
-    const b = await readJson<{ name?: string; phone?: string; plan?: string; subject?: string }>(req);
+    const b = await readJson<{ name?: string; phone?: string; plan?: string; term?: string; subject?: string }>(req);
     const name = cleanName(b.name ?? "");
     const phone = cleanPhone(b.phone ?? "");
     if (name.length < 2) throw new ApiError(400, "bad_name", "اكتب اسم المدرس أو السنتر (حرفان على الأقل).");
     if (!phone) throw new ApiError(400, "bad_phone", "رقم الهاتف غير صحيح. اكتب الأرقام فقط (مثال: 01012345678).");
     const plan: Plan | null = b.plan === "single" || b.plan === "all" ? b.plan : null;
     if (!plan) throw new ApiError(400, "bad_plan", "اختر نوع الاشتراك.");
+    const term: PaidTerm | null = b.term === undefined ? "month" : isPaidTerm(b.term) ? b.term : null; // no term = monthly (older browsers)
+    if (!term) throw new ApiError(400, "bad_term", "اختر مدة الاشتراك (شهري أو سنوي أو دائم). التجربة المجانية لا تحتاج طلبًا.");
     let subject: EntKey = "all";
     if (plan === "single") {
       const s = getSubject(b.subject);
@@ -36,7 +38,7 @@ export async function POST(req: Request) {
     const ref = db().collection("orders").doc();
     const order: OrderDoc = {
       id: ref.id, ref: newRef(), uid: u.uid, email: u.email, name, phone,
-      plan, subject, price: PRICE[plan], listPrice: LIST_PRICE[plan], days: PLAN_DAYS,
+      plan, term, subject, price: priceOf(term, plan), listPrice: listPriceOf(term, plan), days: TERM_DAYS[term], // forever: days = 0
       status: "pending", createdAt: now,
     };
     const batch = db().batch();

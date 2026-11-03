@@ -89,6 +89,9 @@ export async function assertSubjectAccess(u: AuthedUser, subject: string) {
 }
 export const dropAccessCache = (uid: string) => cache.delete(uid);
 
+// The free trial is remembered per e-mail (falls back to uid), in its own collection, so deleting / recreating the user record does not give a second trial.
+export const trialKey = (u: { uid: string; email: string }) => (u.email || u.uid).replace(/\//g, "_");
+
 // One Firestore record per person (keyed by e-mail), whatever the Firebase Auth uid is.
 // If someone was deleted from Firebase Auth and signs in again, Auth gives a NEW uid: the old record (profile, subscriptions, orders, codes)
 // is merged into the new uid's record and the old one is removed, so there are no duplicates and nothing is lost.
@@ -114,6 +117,7 @@ export async function ensureUserDoc(u: AuthedUser): Promise<FirebaseFirestore.Do
   const merged = {
     uid: u.uid, email: u.email, displayName: u.name || pick("displayName"), photoURL: u.picture || pick("photoURL"),
     name: pick("name"), phone: pick("phone"), createdAt: Math.min(...all.map((d) => d.createdAt ?? now)), updatedAt: now,
+    ...(all.some((d) => d.trialUsedAt) ? { trialUsedAt: Math.min(...all.filter((d) => d.trialUsedAt).map((d) => d.trialUsedAt)) } : {}),
     entitlements: [...ents.values()], subscribed: all.some((d) => d.subscribed) || ents.size > 0,
   };
   const batch = db().batch();

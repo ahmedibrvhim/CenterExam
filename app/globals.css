@@ -720,3 +720,37 @@ button.plan-card { cursor: pointer; font: inherit; color: inherit; transition: b
 }
 @media (max-width: 380px) { .plan-pick { grid-template-columns: 1fr; } }
 .sub-x { border: 0; cursor: pointer; } .sub-x:focus-visible { outline: 2px solid var(--accent-2); }
+
+/* ===== Subscription terms: monthly / yearly / forever / free trial ===== */
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.term-pick { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; border: 0; min-width: 0; }
+.term-opt { position: relative; display: grid; justify-items: center; align-content: start; gap: 2px; padding: 12px 6px 10px; text-align: center; cursor: pointer; border-radius: var(--r-md); background: var(--bg-2); border: 1.5px solid rgba(var(--accent-rgb), .2); transition: border-color .15s, background .15s, box-shadow .15s, transform .15s; }
+.term-opt:hover:not(.off) { border-color: rgba(var(--accent-rgb), .55); transform: translateY(-1px); }
+.term-opt .term-ico { font-size: 20px; line-height: 1.2; }
+.term-opt b { font-size: 13.5px; font-weight: 800; }
+.term-opt small { font-size: 10.5px; line-height: 1.4; color: var(--text-2); }
+.term-opt.sel { border-color: var(--accent); background: rgba(var(--accent-rgb), .14); box-shadow: 0 0 18px rgba(var(--accent-rgb), .25); }
+.term-opt.sel b { color: var(--accent-2); }
+.term-opt.free::after { content: "مجانًا"; position: absolute; top: -8px; inset-inline-end: 6px; padding: 0 8px; border-radius: var(--r-pill); font-size: 9.5px; font-weight: 800; line-height: 16px; background: var(--green); color: #052e16; }
+.term-opt.off { opacity: .5; cursor: not-allowed; }
+.term-opt.off.free::after { background: rgba(255,255,255,.2); color: var(--text-2); content: "—"; }
+.term-opt:has(input:focus-visible) { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+.trial-box { display: grid; gap: 8px; padding: 14px; border-radius: var(--r-md); background: rgba(34,197,94,.08); border: 1px dashed rgba(34,197,94,.5); font-size: 13px; }
+.trial-box > b { font-size: 14px; color: #86efac; }
+.trial-box ul { list-style: none; display: grid; gap: 4px; color: var(--text-2); line-height: 1.7; }
+.trial-box li::before { content: "✓"; color: var(--green); font-weight: 900; margin-inline-end: 8px; }
+.trial-box li b { color: var(--text); }
+.sub-meta { display: inline-flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.pill.term-forever { background: rgba(167,139,250,.18); color: #c4b5fd; }
+.pill.term-year { background: rgba(var(--accent-rgb), .16); color: var(--accent-2); }
+.pill.term-trial { background: rgba(34,197,94,.15); color: #86efac; }
+.stats-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.grant-box { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px dashed rgba(255,255,255,.1); }
+.grant-box .input { width: auto; flex: 1 1 110px; padding: 6px 10px; font-size: 12px; }
+.trial-row { margin-top: 4px; }
+.filters select.input { flex: 0 1 150px; min-width: 120px; }
+@media (max-width: 420px) {
+  .term-pick { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .term-opt { grid-template-columns: auto 1fr; justify-items: start; text-align: start; column-gap: 8px; padding: 10px; }
+  .term-opt .term-ico { grid-row: span 2; align-self: center; }
+}

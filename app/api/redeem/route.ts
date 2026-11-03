@@ -1,5 +1,5 @@
 import { ApiError, db, dropAccessCache, handle, readJson, requireUser } from "@/lib/server/admin";
-import { grant, isCodeShape, normalizeCode, type CodeDoc, type Entitlement, type OrderDoc } from "@/lib/plans";
+import { grantTerm, isCodeShape, normalizeCode, termOf, type CodeDoc, type Entitlement, type OrderDoc } from "@/lib/plans";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,7 +32,8 @@ export async function POST(req: Request) {
         return { err: [400, "bad_code", "الكود غير صحيح أو سبق استخدامه أو تم إلغاؤه."] as const };
       }
 
-      const ents: Entitlement[] = grant(user.entitlements, code.subject, code.days, id, now);
+      const term = termOf(code); // forever codes never expire (and are not "30 days"); old codes have no term = monthly
+      const ents: Entitlement[] = grantTerm(user.entitlements, code.subject, term, id, now, term === "forever" ? undefined : code.days || undefined);
       tx.set(userRef, { entitlements: ents, redeemFails: 0, subscribed: true }, { merge: true });
       tx.update(codeRef, { status: "used", usedBy: u.uid, usedByName: user.name || order?.name || u.name, usedByPhone: user.phone || order?.phone || "", usedByEmail: u.email, usedAt: now });
       if (orderRef) tx.update(orderRef, { status: "activated", activatedAt: now });

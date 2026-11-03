@@ -24,7 +24,7 @@ export async function GET(req: Request) {
       warning: orders.status === "rejected" ? `تعذّر تحميل الطلبات: ${String((orders.reason as any)?.message ?? orders.reason).slice(0, 200)}` : "",
       users: dedupe(users.value.docs.filter((d) => !admins.includes(String(d.data().email ?? "").toLowerCase())).map((d) => {
         const x = d.data();
-        return { uid: x.uid ?? d.id, email: x.email ?? "", displayName: x.displayName ?? "", photoURL: x.photoURL ?? "", name: x.name ?? "", phone: x.phone ?? "", createdAt: x.createdAt ?? 0, entitlements: x.entitlements ?? [] };
+        return { uid: x.uid ?? d.id, email: x.email ?? "", displayName: x.displayName ?? "", photoURL: x.photoURL ?? "", name: x.name ?? "", phone: x.phone ?? "", createdAt: x.createdAt ?? 0, entitlements: x.entitlements ?? [], trialUsedAt: x.trialUsedAt ?? 0 };
       })),
     };
   });
