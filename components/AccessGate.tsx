@@ -37,46 +37,27 @@ function Shell({ title, lead, children }: { title: string; lead?: string; childr
   );
 }
 
-function ProfileForm() {
-  const { saveProfile } = useAccess();
-  const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (busy) return;
-    setBusy(true); setErr("");
-    const m = await saveProfile(name, phone);
-    setBusy(false);
-    if (m) setErr(m);
-  };
-  return (
-    <Shell title="بيانات المدرس" lead="اكتب بياناتك مرة واحدة لنتمكن من التواصل معك وإرسال كود الاشتراك.">
-      <form className="gate-form" onSubmit={submit}>
-        <div className="field"><label htmlFor="t-name">اسم المدرس</label><input id="t-name" className="input" autoComplete="name" maxLength={60} value={name} onChange={(e) => setName(e.target.value)} placeholder="مثال: أ/ أحمد محمد" autoFocus /></div>
-        <div className="field"><label htmlFor="t-phone">رقم الهاتف</label><input id="t-phone" className="input" dir="ltr" inputMode="tel" autoComplete="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="01012345678" /></div>
-        {err && <p className="login-err" role="alert">{err}</p>}
-        <button type="submit" className="btn-primary" disabled={busy || name.trim().length < 2 || phone.trim().length < 8}>{busy ? "جاري الحفظ…" : "متابعة"}</button>
-      </form>
-    </Shell>
-  );
-}
-
+// Gateway after login (teachers without an active subscription):
+//   no open order -> order gateway (name / phone / subscription -> "إنشاء الاشتراك")
+//   open order    -> payment gateway (how to pay + enter the code)
 function Activation() {
-  const { entitlements } = useAccess();
+  const { entitlements, order } = useAccess();
   const expired = entitlements.length > 0;
-  return (
-    <Shell title={expired ? "انتهى اشتراكك" : "الاشتراك في CenterExam"} lead="اختر الاشتراك وحوّل المبلغ، ثم أدخل الكود الذي يصلك للدخول إلى الأداة.">
+  return order ? (
+    <Shell title="إتمام الدفع وتفعيل الاشتراك" lead="حوّل المبلغ وأرسل صورة التحويل، ثم أدخل الكود الذي يصلك لفتح الأداة.">
+      <SubscribeFlow />
+    </Shell>
+  ) : (
+    <Shell title={expired ? "انتهى اشتراكك — جدّد الآن" : "الاشتراك في CenterExam"} lead="اكتب اسمك أو اسم السنتر ورقم الهاتف، ثم اختر الاشتراك المناسب.">
       <SubscribeFlow />
     </Shell>
   );
 }
 
-// After the intro: teacher info -> subscription code -> the tool. Admins skip the code.
+// After the intro: order gateway -> payment + code gateway -> the tool. Admins skip all of it.
 export default function AccessGate({ children }: { children: ReactNode }) {
   const splashDone = useSplashDone();
-  const { status, error, profile, active, isAdmin, refresh } = useAccess();
+  const { status, error, active, isAdmin, refresh } = useAccess();
   const { signOut } = useAuth();
   if (!splashDone) return null;
   if (status === "loading") return <div className="login login-loading" role="status" aria-label="جاري التحميل"><span className="login-spin big" /></div>;
@@ -85,7 +66,6 @@ export default function AccessGate({ children }: { children: ReactNode }) {
       <button type="button" className="btn-primary" onClick={refresh}>إعادة المحاولة</button>
     </Shell>
   );
-  if (!profile) return <ProfileForm />;
   if (!isAdmin && active.length === 0) return <Activation />;
   return <>{children}</>;
 }

@@ -1,7 +1,7 @@
 "use client";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { authFetch } from "@/lib/authFetch";
-import { activeOf, covers, type Entitlement } from "@/lib/plans";
+import { activeOf, covers, type Entitlement, type OrderDoc, type Plan } from "@/lib/plans";
 import { useNow } from "@/components/useNow";
 import SubscriptionModal from "@/components/SubscriptionModal";
 
@@ -9,11 +9,14 @@ type Profile = { name: string; phone: string };
 type Status = "loading" | "ready" | "error";
 type Ctx = {
   status: Status; error: string; profile: Profile | null; entitlements: Entitlement[]; isAdmin: boolean; now: number;
+  order: OrderDoc | null;                      // my open order (placed, not activated yet) - drives the payment gateway
   active: Entitlement[];                       // not expired yet
   can: (subject: string) => boolean;           // may this person use the subject right now (admins: always)
   refresh: () => Promise<void>;
   saveProfile: (name: string, phone: string) => Promise<string>;   // returns "" or an error message
   redeem: (code: string) => Promise<string>;                       // returns "" or an error message
+  createOrder: (o: { name: string; phone: string; plan: Plan; subject?: string }) => Promise<string>;   // "make subscription": returns "" or an error message
+  cancelOrder: () => Promise<string>;
   plansOpen: boolean; openPlans: () => void; closePlans: () => void;
 };
 const C = createContext<Ctx | null>(null);
@@ -34,13 +37,14 @@ export default function AccessProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [entitlements, setEnts] = useState<Entitlement[]>([]);
   const [isAdmin, setAdmin] = useState(false);
+  const [order, setOrder] = useState<OrderDoc | null>(null);
   const [plansOpen, setPlansOpen] = useState(false);
   const now = useNow(30_000); // subscriptions end by themselves while the page is open
 
   const refresh = useCallback(async () => {
     const { ok, data } = await call("/api/me");
     if (!ok) { setError(data.error || "تعذّر تحميل بيانات حسابك."); setStatus((s) => (s === "ready" ? s : "error")); return; }
-    setProfile(data.profile); setEnts(data.entitlements ?? []); setAdmin(!!data.isAdmin); setError(""); setStatus("ready");
+    setProfile(data.profile); setEnts(data.entitlements ?? []); setAdmin(!!data.isAdmin); setOrder(data.order ?? null); setError(""); setStatus("ready");
   }, []);
 
   useEffect(() => {
@@ -59,16 +63,32 @@ export default function AccessProvider({ children }: { children: ReactNode }) {
   const redeem = useCallback(async (code: string) => {
     const { ok, data } = await call("/api/redeem", { code });
     if (!ok) return data.error || "تعذّر تفعيل الكود.";
-    setEnts(data.entitlements ?? []); return "";
+    setEnts(data.entitlements ?? []); setOrder(null); refresh(); return "";
+  }, [refresh]);
+
+  const createOrder = useCallback(async (o: { name: string; phone: string; plan: Plan; subject?: string }) => {
+    const { ok, data } = await call("/api/orders", o);
+    if (!ok) return data.error || "تعذّر إنشاء الطلب.";
+    setProfile(data.profile); setOrder(data.order); return "";
   }, []);
 
+  const cancelOrder = useCallback(async () => {
+    if (!order) return "";
+    try {
+      const r = await authFetch("/api/orders", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: order.id, action: "cancel" }), cache: "no-store" });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) return data.error || "تعذّر إلغاء الطلب.";
+    } catch { return "تعذّر الاتصال بالخادم."; }
+    setOrder(null); return "";
+  }, [order]);
+
   const value = useMemo<Ctx>(() => ({
-    status, error, profile, entitlements, isAdmin, now,
+    status, error, profile, entitlements, isAdmin, now, order,
     active: activeOf(entitlements, now),
     can: (subject: string) => isAdmin || covers(entitlements, subject, now),
-    refresh, saveProfile, redeem,
+    refresh, saveProfile, redeem, createOrder, cancelOrder,
     plansOpen, openPlans: () => setPlansOpen(true), closePlans: () => setPlansOpen(false),
-  }), [status, error, profile, entitlements, isAdmin, now, refresh, saveProfile, redeem, plansOpen]);
+  }), [status, error, profile, entitlements, isAdmin, now, order, refresh, saveProfile, redeem, createOrder, cancelOrder, plansOpen]);
 
   return <C.Provider value={value}>{children}{plansOpen && status === "ready" && <SubscriptionModal />}</C.Provider>;
 }

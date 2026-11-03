@@ -1,5 +1,5 @@
 import { ApiError, db, dropAccessCache, handle, readJson, requireUser } from "@/lib/server/admin";
-import { grant, isCodeShape, normalizeCode, type CodeDoc, type Entitlement } from "@/lib/plans";
+import { grant, isCodeShape, normalizeCode, type CodeDoc, type Entitlement, type OrderDoc } from "@/lib/plans";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,12 +18,13 @@ export async function POST(req: Request) {
       const now = Date.now();
       const us = await tx.get(userRef);
       const user = us.data() ?? {};
-      if (!user.name || !user.phone) return { err: [400, "no_profile", "أكمل بيانات المدرس أولًا."] as const };
       if ((user.redeemLockUntil ?? 0) > now) return { err: [429, "locked", "محاولات خاطئة كثيرة. انتظر بضع دقائق ثم حاول مرة أخرى."] as const };
 
       const codeRef = db().collection("codes").doc(isCodeShape(id) ? id : "_invalid_");
       const cs = await tx.get(codeRef);
       const code = cs.data() as CodeDoc | undefined;
+      const orderRef = code?.orderId ? db().collection("orders").doc(code.orderId) : null;
+      const order = orderRef ? ((await tx.get(orderRef)).data() as OrderDoc | undefined) : undefined; // all reads before any write
       if (!isCodeShape(id) || !code || code.status !== "unused") {
         const fails = (user.redeemFails ?? 0) + 1;
         tx.set(userRef, fails >= MAX_FAILS ? { redeemFails: 0, redeemLockUntil: now + LOCK_MS } : { redeemFails: fails }, { merge: true });
@@ -32,7 +33,8 @@ export async function POST(req: Request) {
 
       const ents: Entitlement[] = grant(user.entitlements, code.subject, code.days, id, now);
       tx.set(userRef, { entitlements: ents, redeemFails: 0 }, { merge: true });
-      tx.update(codeRef, { status: "used", usedBy: u.uid, usedByName: user.name, usedByPhone: user.phone, usedByEmail: u.email, usedAt: now });
+      tx.update(codeRef, { status: "used", usedBy: u.uid, usedByName: user.name || order?.name || u.name, usedByPhone: user.phone || order?.phone || "", usedByEmail: u.email, usedAt: now });
+      if (orderRef && order && order.status !== "cancelled") tx.update(orderRef, { status: "activated", activatedAt: now });
       return { ok: true as const, entitlements: ents, now };
     });
 

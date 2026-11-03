@@ -1,10 +1,15 @@
 // Subscription plans + the entitlement rules. Pure code (no Firebase): used by the browser AND the server.
-import { getSubject, type SubjectId } from "@/lib/subjects";
+import { SUBJECTS, getSubject, type SubjectId } from "@/lib/subjects";
 
 export type Plan = "single" | "all";
 export type EntKey = SubjectId | "all";
 
-export const PRICE: Record<Plan, number> = { single: 200, all: 500 }; // EGP per month
+// Pricing: one subject = 200 EGP / month. "All subjects" = (number of subjects x 200) with a 50% discount.
+export const UNIT_PRICE = 200;
+export const ALL_DISCOUNT = 0.5;
+export const SUBJECT_COUNT = SUBJECTS.length;
+export const LIST_PRICE: Record<Plan, number> = { single: UNIT_PRICE, all: SUBJECT_COUNT * UNIT_PRICE }; // before the discount
+export const PRICE: Record<Plan, number> = { single: UNIT_PRICE, all: Math.round(SUBJECT_COUNT * UNIT_PRICE * (1 - ALL_DISCOUNT)) }; // EGP per month, what the customer pays
 export const PLAN_DAYS = 30;
 export const CURRENCY = "جنيه";
 export const DAY_MS = 86_400_000;
@@ -45,12 +50,27 @@ export function cleanPhone(raw: string): string | null {
 export const cleanName = (raw: string) => String(raw ?? "").replace(/\s+/g, " ").trim().slice(0, 60);
 
 export type CodeDoc = {
-  id: string; plan: Plan; subject: EntKey; price: number; days: number;
+  id: string; plan: Plan; subject: EntKey; price: number; days: number; orderId?: string;
   customerName: string; customerPhone: string; note: string;
   status: "unused" | "used" | "revoked";
   createdAt: number; createdBy: string;
   usedBy?: string; usedByName?: string; usedByPhone?: string; usedByEmail?: string; usedAt?: number;
 };
+// An order = what the teacher asked for before paying. The admin sees it, checks the payment and creates the code from it.
+//  pending   -> placed, waiting for payment / code
+//  code_sent -> admin created the code for it
+//  activated -> the teacher entered the code
+//  cancelled -> cancelled by the teacher or the admin
+export type OrderStatus = "pending" | "code_sent" | "activated" | "cancelled";
+export type OrderDoc = {
+  id: string; ref: string; uid: string; email: string; name: string; phone: string;
+  plan: Plan; subject: EntKey; price: number; listPrice: number; days: number;
+  status: OrderStatus; createdAt: number;
+  codeId?: string; codeAt?: number; activatedAt?: number; cancelledAt?: number;
+};
+export const ORDER_STATUS_LABEL: Record<OrderStatus, string> = { pending: "بانتظار الدفع", code_sent: "تم إرسال الكود", activated: "مُفعّل", cancelled: "ملغي" };
+export const isOpenOrder = (o: Pick<OrderDoc, "status">) => o.status === "pending" || o.status === "code_sent";
+
 export type UserDoc = {
   uid: string; email: string; displayName: string; photoURL: string; name: string; phone: string;
   createdAt: number; entitlements: Entitlement[];

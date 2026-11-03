@@ -3,9 +3,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAccess } from "@/components/AccessProvider";
 import { authFetch } from "@/lib/authFetch";
 import { SUBJECTS } from "@/lib/subjects";
-import { CURRENCY, PRICE, daysLeft, entLabel, formatCode, isActive, type CodeDoc, type Plan, type UserDoc } from "@/lib/plans";
+import { CURRENCY, ORDER_STATUS_LABEL, PRICE, daysLeft, entLabel, formatCode, isActive, isOpenOrder, type CodeDoc, type OrderDoc, type Plan, type UserDoc } from "@/lib/plans";
 
-type Overview = { now: number; codes: CodeDoc[]; users: UserDoc[] };
+type Overview = { now: number; codes: CodeDoc[]; users: UserDoc[]; orders: OrderDoc[] };
 const fmt = (t?: number) => (t ? new Date(t).toLocaleDateString("ar-EG", { year: "numeric", month: "short", day: "numeric" }) : "—");
 const STATUS: Record<CodeDoc["status"], string> = { unused: "غير مستخدم", used: "مستخدم", revoked: "ملغي" };
 
@@ -16,13 +16,15 @@ async function api(url: string, method: string, body?: object): Promise<{ ok: bo
   } catch { return { ok: false, data: { error: "تعذّر الاتصال بالخادم." } }; }
 }
 const copy = (t: string) => navigator.clipboard?.writeText(t).catch(() => {});
+const waTo = (phone: string) => `https://wa.me/${phone.replace(/\D/g, "").replace(/^0/, "20")}`;
+const waCode = (phone: string, c: CodeDoc, ref?: string) => `${waTo(phone)}?text=${encodeURIComponent(`كود اشتراك CenterExam${ref ? ` (طلب #${ref})` : ""} — ${entLabel(c.subject)} — 30 يومًا:\n${formatCode(c.id)}\nافتح الموقع وسجّل الدخول ثم أدخل الكود.`)}`;
 const codeLine = (c: CodeDoc) => `${formatCode(c.id)} — ${entLabel(c.subject)} — ${c.price} ${CURRENCY}`;
 
 export default function AdminPage() {
   const { isAdmin } = useAccess();
   const [data, setData] = useState<Overview | null>(null);
   const [err, setErr] = useState("");
-  const [tab, setTab] = useState<"codes" | "users">("codes");
+  const [tab, setTab] = useState<"orders" | "codes" | "users">("orders");
   const [msg, setMsg] = useState("");
 
   const load = useCallback(async () => {
@@ -40,17 +42,19 @@ export default function AdminPage() {
   return (
     <main className="main-content admin" dir="rtl">
       <div className="page-title admin-head">
-        <div><h2>لوحة الإدارة</h2><p>إنشاء أكواد الاشتراك ومتابعة المشتركين. كل اشتراك 30 يومًا من لحظة التفعيل.</p></div>
+        <div><h2>لوحة الإدارة</h2><p>راجع طلبات الاشتراك وأنشئ الكود للعميل بعد التأكد من التحويل. كل اشتراك 30 يومًا من لحظة التفعيل.</p></div>
         <a href="/" className="btn-ghost">‹ الأداة</a>
       </div>
       {err && <p className="login-err" role="alert">{err}</p>}
       {data && <Stats d={data} />}
-      <Generator onDone={load} flash={flash} />
       <div className="tabs" role="tablist">
+        <button role="tab" aria-selected={tab === "orders"} className={tab === "orders" ? "on" : ""} onClick={() => setTab("orders")}>الطلبات{!!data && data.orders.some((o) => o.status === "pending") && <span className="tab-badge">{data.orders.filter((o) => o.status === "pending").length}</span>}</button>
         <button role="tab" aria-selected={tab === "codes"} className={tab === "codes" ? "on" : ""} onClick={() => setTab("codes")}>الأكواد ({data?.codes.length ?? 0})</button>
         <button role="tab" aria-selected={tab === "users"} className={tab === "users" ? "on" : ""} onClick={() => setTab("users")}>المشتركون ({data?.users.length ?? 0})</button>
       </div>
-      {data && (tab === "codes" ? <Codes d={data} reload={load} flash={flash} /> : <Users d={data} reload={load} flash={flash} />)}
+      {data && tab === "orders" && <Orders d={data} reload={load} flash={flash} />}
+      {data && tab === "codes" && <><Generator onDone={load} flash={flash} /><Codes d={data} reload={load} flash={flash} /></>}
+      {data && tab === "users" && <Users d={data} reload={load} flash={flash} />}
       {msg && <div className="toast-wrap"><div className="toast success">{msg}</div></div>}
     </main>
   );
@@ -61,12 +65,78 @@ function Stats({ d }: { d: Overview }) {
   const monthAgo = d.now - 30 * 86_400_000;
   const active = d.users.filter((u) => u.entitlements.some((e) => isActive(e, d.now))).length;
   const tiles: [string, string][] = [
+    ["طلبات بانتظار الكود", String(d.orders.filter((o) => o.status === "pending").length)],
     ["مشتركون فعّالون", String(active)],
     ["أكواد غير مستخدمة", String(d.codes.filter((c) => c.status === "unused").length)],
     ["إيراد آخر 30 يومًا", `${used.filter((c) => (c.usedAt ?? 0) > monthAgo).reduce((n, c) => n + c.price, 0)} ${CURRENCY}`],
     ["إجمالي الإيراد", `${used.reduce((n, c) => n + c.price, 0)} ${CURRENCY}`],
   ];
   return <section className="stats-grid">{tiles.map(([l, v]) => <div key={l} className="stat-tile"><div><div className="st-num">{v}</div><div className="st-label">{l}</div></div></div>)}</section>;
+}
+
+function Orders({ d, reload, flash }: { d: Overview; reload: () => void; flash: (m: string) => void }) {
+  const [f, setF] = useState<"open" | "all">("open");
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState("");
+  const rows = useMemo(() => d.orders.filter((o) => (f === "all" || isOpenOrder(o)) && (!q || `${o.ref} ${o.name} ${o.phone} ${o.email}`.toLowerCase().includes(q.toLowerCase()))), [d.orders, f, q]);
+  const codeOf = (o: OrderDoc) => (o.codeId ? d.codes.find((c) => c.id === o.codeId) : undefined);
+
+  // one click: creates the code from the order (subject / price / customer come from the order) and opens WhatsApp with the code ready to send
+  const makeCode = async (o: OrderDoc) => {
+    setBusy(o.id);
+    const { ok, data } = await api("/api/admin/codes", "POST", { orderId: o.id });
+    setBusy("");
+    if (!ok) { alert(data.error || "تعذّر إنشاء الكود."); return; }
+    const c: CodeDoc = data.codes[0];
+    copy(formatCode(c.id)); flash(`تم إنشاء الكود ${formatCode(c.id)} ونسخه`); reload();
+  };
+  const cancel = async (o: OrderDoc) => {
+    if (!confirm(o.codeId ? "إلغاء الطلب وإلغاء الكود الخاص به؟" : "إلغاء هذا الطلب؟")) return;
+    setBusy(o.id);
+    const { ok, data } = await api("/api/admin/orders", "PATCH", { id: o.id, action: "cancel" });
+    setBusy("");
+    if (!ok) { alert(data.error || "فشل الإجراء"); return; }
+    flash("تم الإلغاء"); reload();
+  };
+
+  return (
+    <section className="panel">
+      <div className="filters">
+        <input className="input" placeholder="بحث برقم الطلب أو الاسم أو الهاتف" value={q} onChange={(e) => setQ(e.target.value)} />
+        <select className="input" value={f} onChange={(e) => setF(e.target.value as "open" | "all")}>
+          <option value="open">الطلبات المفتوحة</option><option value="all">كل الطلبات</option>
+        </select>
+      </div>
+      <div className="tbl-wrap"><table className="tbl">
+        <thead><tr><th>الطلب</th><th>العميل</th><th>الاشتراك المطلوب</th><th>الحالة</th><th>الكود</th><th></th></tr></thead>
+        <tbody>
+          {rows.map((o) => {
+            const c = codeOf(o);
+            return (
+              <tr key={o.id}>
+                <td><code dir="ltr" className="ord-open">#{o.ref}</code><small>{fmt(o.createdAt)}</small></td>
+                <td>{o.name}<small dir="ltr">{o.phone}</small><small dir="ltr">{o.email}</small></td>
+                <td><b>{entLabel(o.subject)}</b><small>{o.price} {CURRENCY}{o.plan === "all" ? ` · بدل ${o.listPrice} (خصم)` : ""}</small></td>
+                <td><span className={`pill ${o.status === "activated" ? "ok" : o.status === "cancelled" ? "bad" : o.status === "pending" ? "warn" : ""}`}>{ORDER_STATUS_LABEL[o.status]}</span>{o.status === "activated" && <small>{fmt(o.activatedAt)}</small>}</td>
+                <td>{c ? (
+                  <div className="ord-code">
+                    <code dir="ltr">{formatCode(c.id)}</code>
+                    <button className="btn-ghost" onClick={() => { copy(formatCode(c.id)); flash("تم النسخ"); }}>نسخ</button>
+                    {o.status === "code_sent" && <a className="btn-ghost" href={waCode(o.phone, c, o.ref)} target="_blank" rel="noreferrer">واتساب</a>}
+                  </div>
+                ) : "—"}</td>
+                <td className="acts">
+                  {o.status === "pending" && <button className="btn-primary" disabled={busy === o.id} onClick={() => makeCode(o)}>{busy === o.id ? "…" : "إنشاء كود"}</button>}
+                  {isOpenOrder(o) && <button className="btn-ghost" disabled={busy === o.id} onClick={() => cancel(o)}>إلغاء</button>}
+                </td>
+              </tr>
+            );
+          })}
+          {!rows.length && <tr><td colSpan={6} className="empty">{f === "open" ? "لا توجد طلبات مفتوحة" : "لا توجد طلبات"}</td></tr>}
+        </tbody>
+      </table></div>
+    </section>
+  );
 }
 
 function Generator({ onDone, flash }: { onDone: () => void; flash: (m: string) => void }) {
@@ -92,7 +162,7 @@ function Generator({ onDone, flash }: { onDone: () => void; flash: (m: string) =
 
   return (
     <section className="panel">
-      <h3>إنشاء كود جديد</h3>
+      <h3>إنشاء كود يدوي (بدون طلب)</h3>
       <form className="gen-form" onSubmit={submit}>
         <div className="field"><label>نوع الاشتراك</label>
           <select className="input" value={plan} onChange={(e) => setPlan(e.target.value as Plan)}>
