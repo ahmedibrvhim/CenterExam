@@ -8,7 +8,7 @@ import { getSubject, type SubjectId } from "@/lib/subjects";
 export default function Header({ subject, onChangeSubject }: { subject?: SubjectId | null; onChangeSubject?: () => void }) {
   const s = getSubject(subject);
   const { user, signOut } = useAuth();
-  const { isAdmin, openPlans } = useAccess();
+  const { openPlans } = useAccess();
   return (
     <header className="site-header">
       <div className="site-header-inner">
@@ -25,7 +25,6 @@ export default function Header({ subject, onChangeSubject }: { subject?: Subject
         )}
         <ThemePicker />
         <button type="button" className="btn-ghost" onClick={openPlans}>اشتراكي</button>
-        {isAdmin && <a href="/admin" className="btn-ghost">الإدارة</a>}
         {user && (
           <div className="user-chip">
             {user.photoURL ? <img src={user.photoURL} alt="" referrerPolicy="no-referrer" width={28} height={28} /> : <span className="user-ini" aria-hidden="true">{(user.displayName || user.email || "?").slice(0, 1).toUpperCase()}</span>}
