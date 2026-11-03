@@ -42,7 +42,7 @@ export default function AdminPage() {
   return (
     <main className="main-content admin" dir="rtl">
       <div className="page-title admin-head">
-        <div><h2>لوحة الإدارة</h2><p>راجع طلبات الاشتراك وأنشئ الكود للعميل بعد التأكد من التحويل. كل اشتراك 30 يومًا من لحظة التفعيل.</p></div>
+        <div><h2>لوحة الإدارة</h2><p>كل بيانات العميل تصلك من طلبه. تأكد من التحويل ثم اضغط «إنشاء كود» وأرسله له، أو احذف الطلب.</p></div>
         <a href="/" className="btn-ghost">‹ الأداة</a>
       </div>
       {err && <p className="login-err" role="alert">{err}</p>}
@@ -74,14 +74,19 @@ function Stats({ d }: { d: Overview }) {
   return <section className="stats-grid">{tiles.map(([l, v]) => <div key={l} className="stat-tile"><div><div className="st-num">{v}</div><div className="st-label">{l}</div></div></div>)}</section>;
 }
 
+type OrderFilter = "open" | OrderDoc["status"] | "all";
+const fmtTime = (t?: number) => (t ? new Date(t).toLocaleString("ar-EG", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—");
+
 function Orders({ d, reload, flash }: { d: Overview; reload: () => void; flash: (m: string) => void }) {
-  const [f, setF] = useState<"open" | "all">("open");
+  const [f, setF] = useState<OrderFilter>("open");
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState("");
-  const rows = useMemo(() => d.orders.filter((o) => (f === "all" || isOpenOrder(o)) && (!q || `${o.ref} ${o.name} ${o.phone} ${o.email}`.toLowerCase().includes(q.toLowerCase()))), [d.orders, f, q]);
+  const count = (k: OrderFilter) => d.orders.filter((o) => (k === "all" ? true : k === "open" ? isOpenOrder(o) : o.status === k)).length;
+  const rows = useMemo(() => d.orders.filter((o) => (f === "all" || (f === "open" ? isOpenOrder(o) : o.status === f)) && (!q || `${o.ref} ${o.name} ${o.phone} ${o.email}`.toLowerCase().includes(q.toLowerCase()))), [d.orders, f, q]);
   const codeOf = (o: OrderDoc) => (o.codeId ? d.codes.find((c) => c.id === o.codeId) : undefined);
+  const userOf = (o: OrderDoc) => d.users.find((u) => u.uid === o.uid);
 
-  // one click: creates the code from the order (subject / price / customer come from the order) and opens WhatsApp with the code ready to send
+  // one click: creates the code from the order (subject / price / customer all come from the order) and copies it
   const makeCode = async (o: OrderDoc) => {
     setBusy(o.id);
     const { ok, data } = await api("/api/admin/codes", "POST", { orderId: o.id });
@@ -90,51 +95,62 @@ function Orders({ d, reload, flash }: { d: Overview; reload: () => void; flash: 
     const c: CodeDoc = data.codes[0];
     copy(formatCode(c.id)); flash(`تم إنشاء الكود ${formatCode(c.id)} ونسخه`); reload();
   };
-  const cancel = async (o: OrderDoc) => {
-    if (!confirm(o.codeId ? "إلغاء الطلب وإلغاء الكود الخاص به؟" : "إلغاء هذا الطلب؟")) return;
+  const act = async (o: OrderDoc, action: "cancel" | "delete") => {
+    const msg = action === "delete"
+      ? (o.status === "activated" ? "حذف سجل هذا الطلب نهائيًا؟ (اشتراك العميل الفعّال لن يتأثر)" : "حذف هذا الطلب نهائيًا؟" + (o.codeId ? " وسيُحذف الكود الخاص به أيضًا." : ""))
+      : "إلغاء هذا الطلب؟" + (o.codeId ? " وسيُلغى الكود الخاص به." : "");
+    if (!confirm(msg)) return;
     setBusy(o.id);
-    const { ok, data } = await api("/api/admin/orders", "PATCH", { id: o.id, action: "cancel" });
+    const { ok, data } = await api("/api/admin/orders", "PATCH", { id: o.id, action });
     setBusy("");
     if (!ok) { alert(data.error || "فشل الإجراء"); return; }
-    flash("تم الإلغاء"); reload();
+    flash(action === "delete" ? "تم الحذف" : "تم الإلغاء"); reload();
   };
+  const FILTERS: [OrderFilter, string][] = [["open", "المفتوحة"], ["pending", "جديدة"], ["code_sent", "تم إرسال الكود"], ["activated", "مُفعّلة"], ["cancelled", "ملغية"], ["all", "الكل"]];
 
   return (
     <section className="panel">
-      <div className="filters">
-        <input className="input" placeholder="بحث برقم الطلب أو الاسم أو الهاتف" value={q} onChange={(e) => setQ(e.target.value)} />
-        <select className="input" value={f} onChange={(e) => setF(e.target.value as "open" | "all")}>
-          <option value="open">الطلبات المفتوحة</option><option value="all">كل الطلبات</option>
-        </select>
+      <div className="ord-filters" role="group" aria-label="تصفية الطلبات">
+        {FILTERS.map(([k, l]) => <button key={k} type="button" className={f === k ? "on" : ""} onClick={() => setF(k)}>{l} ({count(k)})</button>)}
       </div>
-      <div className="tbl-wrap"><table className="tbl">
-        <thead><tr><th>الطلب</th><th>العميل</th><th>الاشتراك المطلوب</th><th>الحالة</th><th>الكود</th><th></th></tr></thead>
-        <tbody>
-          {rows.map((o) => {
-            const c = codeOf(o);
-            return (
-              <tr key={o.id}>
-                <td><code dir="ltr" className="ord-open">#{o.ref}</code><small>{fmt(o.createdAt)}</small></td>
-                <td>{o.name}<small dir="ltr">{o.phone}</small><small dir="ltr">{o.email}</small></td>
-                <td><b>{entLabel(o.subject)}</b><small>{o.price} {CURRENCY}{o.plan === "all" ? ` · بدل ${o.listPrice} (خصم)` : ""}</small></td>
-                <td><span className={`pill ${o.status === "activated" ? "ok" : o.status === "cancelled" ? "bad" : o.status === "pending" ? "warn" : ""}`}>{ORDER_STATUS_LABEL[o.status]}</span>{o.status === "activated" && <small>{fmt(o.activatedAt)}</small>}</td>
-                <td>{c ? (
-                  <div className="ord-code">
-                    <code dir="ltr">{formatCode(c.id)}</code>
-                    <button className="btn-ghost" onClick={() => { copy(formatCode(c.id)); flash("تم النسخ"); }}>نسخ</button>
-                    {o.status === "code_sent" && <a className="btn-ghost" href={waCode(o.phone, c, o.ref)} target="_blank" rel="noreferrer">واتساب</a>}
-                  </div>
-                ) : "—"}</td>
-                <td className="acts">
-                  {o.status === "pending" && <button className="btn-primary" disabled={busy === o.id} onClick={() => makeCode(o)}>{busy === o.id ? "…" : "إنشاء كود"}</button>}
-                  {isOpenOrder(o) && <button className="btn-ghost" disabled={busy === o.id} onClick={() => cancel(o)}>إلغاء</button>}
-                </td>
-              </tr>
-            );
-          })}
-          {!rows.length && <tr><td colSpan={6} className="empty">{f === "open" ? "لا توجد طلبات مفتوحة" : "لا توجد طلبات"}</td></tr>}
-        </tbody>
-      </table></div>
+      <div className="filters" style={{ marginBottom: 12 }}>
+        <input className="input" placeholder="بحث برقم الطلب أو الاسم أو الهاتف أو البريد" value={q} onChange={(e) => setQ(e.target.value)} />
+      </div>
+      <div className="ord-list">
+        {rows.map((o) => {
+          const c = codeOf(o);
+          const u = userOf(o);
+          const current = (u?.entitlements ?? []).filter((e) => isActive(e, d.now));
+          return (
+            <article key={o.id} className={`ord-card${o.status === "pending" ? " is-pending" : ""}`}>
+              <div className="ord-head">
+                <div><code dir="ltr">#{o.ref}</code> <small>{fmtTime(o.createdAt)}</small></div>
+                <span className={`pill ${o.status === "activated" ? "ok" : o.status === "cancelled" ? "bad" : o.status === "pending" ? "warn" : ""}`}>{ORDER_STATUS_LABEL[o.status]}</span>
+              </div>
+              <dl className="ord-fields">
+                <div><dt>الاسم (مدرس / سنتر)</dt><dd>{o.name}</dd></div>
+                <div><dt>رقم الهاتف</dt><dd dir="ltr" style={{ textAlign: "end" }}>{o.phone}</dd></div>
+                <div><dt>البريد (حساب Google)</dt><dd dir="ltr" style={{ textAlign: "end" }}>{o.email || "—"}</dd></div>
+                <div><dt>الاشتراك المطلوب</dt><dd>{o.plan === "all" ? "كل المواد" : `مادة واحدة — ${entLabel(o.subject)}`}<small>{o.days} يومًا</small></dd></div>
+                <div><dt>المبلغ المطلوب</dt><dd>{o.price} {CURRENCY}{o.plan === "all" && o.listPrice > o.price && <small>بدل {o.listPrice} (خصم {Math.round((1 - o.price / o.listPrice) * 100)}%)</small>}</dd></div>
+                <div><dt>اشتراكه الحالي</dt><dd>{current.length ? current.map((e) => `${entLabel(e.subject)} (${daysLeft(e, d.now)} يوم)`).join("، ") : "لا يوجد"}</dd></div>
+                {c && <div><dt>الكود</dt><dd><code dir="ltr">{formatCode(c.id)}</code><small>{c.status === "used" ? `استُخدم ${fmtTime(c.usedAt)}` : c.status === "revoked" ? "ملغي" : `أُنشئ ${fmtTime(c.createdAt)}`}</small></dd></div>}
+                {o.status === "activated" && <div><dt>تاريخ التفعيل</dt><dd>{fmtTime(o.activatedAt)}</dd></div>}
+              </dl>
+              <div className="ord-actions">
+                {o.status === "pending" && <button className="btn-primary" disabled={busy === o.id} onClick={() => makeCode(o)}>{busy === o.id ? "…" : "إنشاء كود"}</button>}
+                {c && o.status === "code_sent" && <button className="btn-ghost" onClick={() => { copy(formatCode(c.id)); flash("تم نسخ الكود"); }}>نسخ الكود</button>}
+                {c && o.status === "code_sent" && <a className="btn-ghost" href={waCode(o.phone, c, o.ref)} target="_blank" rel="noreferrer">إرسال الكود واتساب</a>}
+                <a className="btn-ghost" href={waTo(o.phone)} target="_blank" rel="noreferrer">واتساب العميل</a>
+                <a className="btn-ghost" href={`tel:${o.phone}`}>اتصال</a>
+                {isOpenOrder(o) && <button className="btn-ghost" disabled={busy === o.id} onClick={() => act(o, "cancel")}>إلغاء</button>}
+                <button className="btn-ghost btn-danger" disabled={busy === o.id} onClick={() => act(o, "delete")}>حذف الطلب</button>
+              </div>
+            </article>
+          );
+        })}
+        {!rows.length && <p className="empty hint" style={{ textAlign: "center", padding: 24 }}>لا توجد طلبات هنا</p>}
+      </div>
     </section>
   );
 }

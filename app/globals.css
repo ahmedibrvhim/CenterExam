@@ -636,3 +636,40 @@ button.plan-card { cursor: pointer; font: inherit; color: inherit; transition: b
 .tabs .tab-badge { display: inline-block; min-width: 18px; margin-inline-start: 6px; padding: 0 6px; border-radius: var(--r-pill); background: #ef4444; color: #fff; font-size: 11px; line-height: 18px; }
 .ord-code { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; } .ord-code code { color: var(--accent-2); letter-spacing: 1px; }
 .ord-open { font-weight: 800; }
+
+/* ---- navbar: clean layout on phones ---- */
+.hdr-row2 { display: contents; }
+.user-chip { flex-shrink: 0; }
+.hdr-admin { white-space: nowrap; }
+@media (max-width: 700px) {
+  .site-header-inner { flex-wrap: wrap; row-gap: 8px; column-gap: 10px; }
+  .brand { flex: 1 1 0; }
+  .user-chip { margin-inline-start: 0; gap: 6px; }
+  .user-chip .btn-ghost { padding: 5px 12px; font-size: 12px; min-height: 0; }
+  .hdr-row2 { display: flex; order: 10; flex: 1 1 100%; align-items: center; gap: 8px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+  .hdr-row2::-webkit-scrollbar { display: none; }
+  .hdr-row2 > * { flex: 0 0 auto; }
+  .hdr-row2 .btn-ghost { padding: 5px 12px; font-size: 12px; min-height: 34px; display: inline-flex; align-items: center; }
+  .sub-status { font-size: 12px; }
+}
+
+/* ---- admin: orders as cards (readable on a phone) ---- */
+.ord-list { display: grid; gap: 12px; }
+.ord-card { display: grid; gap: 12px; padding: 14px; border-radius: var(--r-md); background: var(--bg-2); border: 1px solid rgba(var(--accent-rgb), .18); }
+.ord-card.is-pending { border-color: rgba(245,158,11,.55); }
+.ord-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.ord-head code { font-size: 17px; font-weight: 800; letter-spacing: 2px; color: var(--accent-2); }
+.ord-head small { color: var(--text-3); font-size: 11.5px; }
+.ord-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px 16px; margin: 0; }
+.ord-fields > div { display: grid; gap: 2px; min-width: 0; }
+.ord-fields dt { font-size: 11.5px; color: var(--text-3); }
+.ord-fields dd { margin: 0; font-size: 14px; font-weight: 700; overflow-wrap: anywhere; }
+.ord-fields dd small { display: block; font-weight: 500; color: var(--text-3); font-size: 11.5px; }
+.ord-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 4px; border-top: 1px dashed rgba(255,255,255,.1); }
+.ord-actions .btn-primary { min-height: 40px; padding: 8px 18px; }
+.ord-actions .btn-ghost { min-height: 40px; display: inline-flex; align-items: center; }
+.btn-danger { color: #fca5a5; border-color: rgba(239,68,68,.45); }
+.ord-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.ord-filters button { padding: 6px 14px; border-radius: var(--r-pill); font-size: 12.5px; font-weight: 700; color: var(--text-2); background: var(--bg-2); border: 1px solid rgba(var(--accent-rgb), .15); }
+.ord-filters button.on { color: #001018; background: var(--accent); }
+@media (max-width: 700px) { .tabs { overflow-x: auto; } .tabs button { white-space: nowrap; } }
