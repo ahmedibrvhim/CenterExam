@@ -33,7 +33,7 @@ export async function POST(req: Request) {
       }
 
       const ents: Entitlement[] = grant(user.entitlements, code.subject, code.days, id, now);
-      tx.set(userRef, { entitlements: ents, redeemFails: 0 }, { merge: true });
+      tx.set(userRef, { entitlements: ents, redeemFails: 0, subscribed: true }, { merge: true });
       tx.update(codeRef, { status: "used", usedBy: u.uid, usedByName: user.name || order?.name || u.name, usedByPhone: user.phone || order?.phone || "", usedByEmail: u.email, usedAt: now });
       if (orderRef) tx.update(orderRef, { status: "activated", activatedAt: now });
       return { ok: true as const, entitlements: ents, now };

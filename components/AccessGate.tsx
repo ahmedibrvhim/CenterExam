@@ -57,7 +57,7 @@ function Activation() {
 // After the intro: order gateway -> payment + code gateway -> the tool. Admins skip all of it.
 export default function AccessGate({ children }: { children: ReactNode }) {
   const splashDone = useSplashDone();
-  const { status, error, entitlements, isAdmin, refresh } = useAccess();
+  const { status, error, everSubscribed, isAdmin, refresh } = useAccess();
   const { signOut } = useAuth();
   if (!splashDone) return null;
   if (status === "loading") return <div className="login login-loading" role="status" aria-label="جاري التحميل"><span className="login-spin big" /></div>;
@@ -67,6 +67,6 @@ export default function AccessGate({ children }: { children: ReactNode }) {
     </Shell>
   );
   // the order / payment gateway is only for a person who never had a subscription; after it ends they still enter the tool and renew from «اشتراكي»
-  if (!isAdmin && entitlements.length === 0) return <Activation />;
+  if (!isAdmin && !everSubscribed) return <Activation />;
   return <>{children}</>;
 }

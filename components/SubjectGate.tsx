@@ -4,7 +4,7 @@ import { useAccess } from "@/components/AccessProvider";
 
 // Shown before the tool opens: the teacher picks the subject, and the tool then adapts its inputs (question types, counts, AI rules).
 export default function SubjectGate({ onPick }: { onPick: (id: SubjectId) => void }) {
-  const { can, openPlans } = useAccess();
+  const { can, openPlans, lapsed } = useAccess();
   return (
     <section className="gate" aria-labelledby="gate-title">
       <div className="gate-head">
@@ -15,11 +15,11 @@ export default function SubjectGate({ onPick }: { onPick: (id: SubjectId) => voi
         {SUBJECTS.map((s, i) => {
           const ok = can(s.id);
           return (
-          <button key={s.id} type="button" className={`gate-card${s.ready ? " ready" : ""}${ok ? "" : " locked"}`} style={{ animationDelay: `${i * 70}ms` }} onClick={() => (ok ? onPick(s.id) : openPlans())}>
+          <button key={s.id} type="button" className={`gate-card${s.ready ? " ready" : ""}${ok ? "" : " locked"}`} style={{ animationDelay: `${i * 70}ms` }} onClick={() => (ok ? onPick(s.id) : openPlans(s.id))}>
             <span className="gate-ico" aria-hidden="true">{s.icon}</span>
             <span className="gate-name">{s.name}</span>
             <span className="gate-tag">{s.tagline}</span>
-            {!ok ? <span className="gate-badge">🔒 غير مشمولة باشتراكك</span> : s.ready ? <span className="gate-badge ok">أنواع أسئلة مخصّصة</span> : <span className="gate-badge">أنواع عامة · التخصيص قريبًا</span>}
+            {!ok ? <span className="gate-badge">{lapsed(s.id) ? "🔒 انتهى اشتراكك — اضغط للتجديد" : "🔒 اضغط للاشتراك في هذه المادة"}</span> : s.ready ? <span className="gate-badge ok">أنواع أسئلة مخصّصة</span> : <span className="gate-badge">أنواع عامة · التخصيص قريبًا</span>}
           </button>
           );
         })}

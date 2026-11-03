@@ -25,9 +25,9 @@ export async function POST(req: Request) {
         const days = Math.min(366, Math.max(1, Math.floor(Number(b.days) || 30)));
         list = grant(list, key, days, "ADMIN", now);
       } else if (b.action === "remove") {
-        list = list.filter((e) => e.subject !== key);
+        list = list.map((e) => (e.subject === key ? { ...e, expiresAt: Math.min(e.expiresAt, now) } : e)); // end it now but keep the row (history)
       } else throw new ApiError(400, "bad_action", "إجراء غير معروف.");
-      tx.update(ref, { entitlements: list });
+      tx.update(ref, { entitlements: list, subscribed: true });
       return list;
     });
     dropAccessCache(uid);

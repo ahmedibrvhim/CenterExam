@@ -11,19 +11,19 @@ import CodeForm from "@/components/CodeForm";
 //   1) OrderStep   - teacher / center name + phone + the subscription (subject or all) with its price -> "إنشاء الاشتراك" places an order.
 //   2) PaymentStep - how to pay + the receipt on WhatsApp + the box where the code (sent back by the admin) is entered.
 // The step shown is decided by the server: an open order => PaymentStep.
-export default function SubscribeFlow({ onDone }: { onDone?: () => void }) {
+export default function SubscribeFlow({ onDone, subject }: { onDone?: () => void; subject?: string | null }) {
   const { order } = useAccess();
-  return order ? <PaymentStep order={order} onDone={onDone} /> : <OrderStep onDone={onDone} />;
+  return order ? <PaymentStep order={order} onDone={onDone} /> : <OrderStep onDone={onDone} fixed={subject ?? null} />;
 }
 
 const money = (n: number) => `${n} ${CURRENCY}`;
 
-function OrderStep({ onDone }: { onDone?: () => void }) {
+function OrderStep({ onDone, fixed }: { onDone?: () => void; fixed: string | null }) {
   const { profile, createOrder } = useAccess();
   const [name, setName] = useState(profile?.name ?? "");
   const [phone, setPhone] = useState(profile?.phone ?? "");
   const [plan, setPlan] = useState<Plan>("single");
-  const [subject, setSubject] = useState("");
+  const [subject, setSubject] = useState(fixed ?? "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
@@ -49,9 +49,9 @@ function OrderStep({ onDone }: { onDone?: () => void }) {
       <h4><span className="step-n2">2</span> اختر الاشتراك</h4>
       <div className="plan-pick">
         <button type="button" className={`plan-card${plan === "single" ? " sel" : ""}`} aria-pressed={plan === "single"} onClick={() => setPlan("single")}>
-          <b>مادة واحدة</b>
+          <b>{fixed ? entLabel(fixed as never) : "مادة واحدة"}</b>
           <span className="plan-price">{UNIT_PRICE} <small>{CURRENCY} / شهر</small></span>
-          <small>تختار المادة من الأسفل</small>
+          <small>{fixed ? "هذه المادة فقط" : "تختار المادة من الأسفل"}</small>
         </button>
         <button type="button" className={`plan-card${plan === "all" ? " sel" : ""}`} aria-pressed={plan === "all"} onClick={() => setPlan("all")}>
           <span className="plan-tag">خصم {off}%</span>
@@ -61,7 +61,7 @@ function OrderStep({ onDone }: { onDone?: () => void }) {
         </button>
       </div>
 
-      {plan === "single" && (
+      {plan === "single" && !fixed && (
         <div className="subj-pick" role="radiogroup" aria-label="المادة">
           {SUBJECTS.map((s) => (
             <button key={s.id} type="button" role="radio" aria-checked={subject === s.id} className={`subj-chip${subject === s.id ? " sel" : ""}`} onClick={() => setSubject(s.id)}>

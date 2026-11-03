@@ -114,7 +114,7 @@ export async function ensureUserDoc(u: AuthedUser): Promise<FirebaseFirestore.Do
   const merged = {
     uid: u.uid, email: u.email, displayName: u.name || pick("displayName"), photoURL: u.picture || pick("photoURL"),
     name: pick("name"), phone: pick("phone"), createdAt: Math.min(...all.map((d) => d.createdAt ?? now)), updatedAt: now,
-    entitlements: [...ents.values()],
+    entitlements: [...ents.values()], subscribed: all.some((d) => d.subscribed) || ents.size > 0,
   };
   const batch = db().batch();
   batch.set(ref, merged);
