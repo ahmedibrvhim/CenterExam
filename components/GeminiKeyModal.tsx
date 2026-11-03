@@ -8,6 +8,8 @@ export default function GeminiKeyModal({ onClose }: { onClose: () => void }) {
   const [loading, setLoading] = useState(true);
   const [last4, setLast4] = useState("");
   const [hasOwn, setHasOwn] = useState(false);
+  const [shared, setShared] = useState(false); // using the site's key (free trial / admin) because no own key yet
+  const [admin, setAdmin] = useState(false);
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -25,7 +27,7 @@ export default function GeminiKeyModal({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     setMounted(true);
-    call("GET").then(({ ok, d }) => { if (ok) { setHasOwn(!!d.hasOwn); setLast4(d.last4 || ""); } }).finally(() => setLoading(false));
+    call("GET").then(({ ok, d }) => { if (ok) { setHasOwn(!!d.hasOwn); setLast4(d.last4 || ""); setShared(!!d.usingShared); setAdmin(!!d.isAdmin); } }).finally(() => setLoading(false));
     const k = (e: KeyboardEvent) => { if (e.key === "Escape") closeRef.current(); };
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
@@ -38,7 +40,7 @@ export default function GeminiKeyModal({ onClose }: { onClose: () => void }) {
     const { ok, d } = await call("POST", { key: value.trim() });
     setBusy(false);
     if (!ok) return setMsg({ ok: false, text: d.error || "تعذّر حفظ المفتاح." });
-    setHasOwn(true); setLast4(d.last4 || ""); setValue(""); setMsg({ ok: true, text: "تم حفظ مفتاحك. يمكنك الآن توليد الأسئلة." }); changed(true);
+    setHasOwn(true); setShared(false); setLast4(d.last4 || ""); setValue(""); setMsg({ ok: true, text: "تم حفظ مفتاحك. يمكنك الآن توليد الأسئلة." }); changed(true);
   };
   const remove = async () => {
     if (!confirm("حذف مفتاحك؟ لن تستطيع توليد أسئلة حتى تضيف مفتاحًا جديدًا.")) return;
@@ -60,6 +62,8 @@ export default function GeminiKeyModal({ onClose }: { onClose: () => void }) {
 
         {loading ? <p className="hint">جارٍ التحميل…</p> : hasOwn ? (
           <p className="hint" style={{ marginTop: 10 }}>✅ لديك مفتاح محفوظ ينتهي بـ <b dir="ltr">…{last4}</b>. لاستبداله الصق مفتاحًا جديدًا بالأسفل.</p>
+        ) : shared ? (
+          <p className="hint" style={{ marginTop: 10 }}>{admin ? "👑 حساب المدير يستخدم مفتاح الموقع. يمكنك إضافة مفتاح خاص بك إن أردت." : "🎁 أنت في التجربة المجانية وتستخدم مفتاح الموقع الآن. بعد الاشتراك ستحتاج إلى إضافة مفتاحك الخاص (يمكنك إضافته من الآن)."}</p>
         ) : (
           <p className="hint" style={{ marginTop: 10 }}>⚠️ لم تضف مفتاحًا بعد.</p>
         )}

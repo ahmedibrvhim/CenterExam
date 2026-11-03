@@ -1,5 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypto";
 import { ApiError, db, trialKey, type AuthedUser } from "@/lib/server/admin";
+import { activeOf, isTrial, type Entitlement } from "@/lib/plans";
 
 // Each teacher's own Gemini key lives in Firestore, collection "geminiKeys", ENCRYPTED (AES-256-GCM) with KEY_ENCRYPTION_SECRET.
 // It is keyed by e-mail (same rule as the free trial), so deleting/recreating the Auth user does not lose it.
@@ -43,18 +44,35 @@ async function load(u: AuthedUser) {
   return v;
 }
 
-// The key this person must use. Their own key first. The shared GEMINI_API_KEY from Vercel is used ONLY for admins,
-// or for everyone if you set ALLOW_SHARED_GEMINI_KEY=1 (useful as a temporary fallback while teachers add their keys).
+// Is this person on the FREE TRIAL only? (has running rights and every one of them is a trial; a paid right means they must use their own key)
+const trialCache = new Map<string, { at: number; on: boolean }>();
+async function onTrialOnly(u: AuthedUser): Promise<boolean> {
+  const hit = trialCache.get(u.uid);
+  if (hit && Date.now() - hit.at < 15_000) return hit.on;
+  const s = await db().collection("users").doc(u.uid).get();
+  const act = activeOf((s.data()?.entitlements as Entitlement[]) ?? [], Date.now());
+  const on = act.length > 0 && act.every(isTrial);
+  trialCache.set(u.uid, { at: Date.now(), on });
+  if (trialCache.size > 500) trialCache.clear();
+  return on;
+}
+
+// May this person use the shared GEMINI_API_KEY from Vercel? Admins, people on the free trial, and everyone if ALLOW_SHARED_GEMINI_KEY=1.
+async function mayUseShared(u: AuthedUser): Promise<boolean> {
+  if (!process.env.GEMINI_API_KEY) return false;
+  return u.isAdmin || process.env.ALLOW_SHARED_GEMINI_KEY === "1" || (await onTrialOnly(u));
+}
+
+// The key this person must use. Their own key first; otherwise the site's key (admins + free trial); paid subscribers must add their own.
 export async function getUserKey(u: AuthedUser): Promise<{ key: string; own: boolean } | null> {
   const own = await load(u);
   if (own.key) return { key: own.key, own: true };
-  const shared = process.env.GEMINI_API_KEY;
-  if (shared && (u.isAdmin || process.env.ALLOW_SHARED_GEMINI_KEY === "1")) return { key: shared, own: false };
+  if (await mayUseShared(u)) return { key: process.env.GEMINI_API_KEY!, own: false };
   return null;
 }
 export async function keyInfo(u: AuthedUser) {
   const own = await load(u);
-  return { hasOwn: !!own.key, last4: own.last4 };
+  return { hasOwn: !!own.key, last4: own.last4, usingShared: !own.key && (await mayUseShared(u)), isAdmin: u.isAdmin };
 }
 export async function saveUserKey(u: AuthedUser, key: string) {
   const id = trialKey(u);
