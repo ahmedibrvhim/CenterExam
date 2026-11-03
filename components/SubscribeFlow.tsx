@@ -81,11 +81,6 @@ function OrderStep({ onDone }: { onDone?: () => void }) {
       {err && <p className="login-err" role="alert">{err}</p>}
       <button type="submit" className="btn-primary" disabled={busy || !valid}>{busy ? "جاري إنشاء الطلب…" : "إنشاء الاشتراك"}</button>
       {plan === "single" && !subject && <p className="hint">اختر المادة لتتمكن من إنشاء الاشتراك.</p>}
-
-      <details className="have-code">
-        <summary>لديك كود بالفعل؟</summary>
-        <CodeForm onDone={onDone} />
-      </details>
     </form>
   );
 }

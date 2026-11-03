@@ -25,7 +25,7 @@ export async function POST(req: Request) {
       const code = cs.data() as CodeDoc | undefined;
       const orderRef = code?.orderId ? db().collection("orders").doc(code.orderId) : null;
       const order = orderRef ? ((await tx.get(orderRef)).data() as OrderDoc | undefined) : undefined; // all reads before any write
-      if (!isCodeShape(id) || !code || code.status !== "unused") {
+      if (!isCodeShape(id) || !code || code.status !== "unused" || !order || order.uid !== u.uid || order.status === "cancelled") { // codes only exist for an order, and only its owner can use it
         const fails = (user.redeemFails ?? 0) + 1;
         tx.set(userRef, fails >= MAX_FAILS ? { redeemFails: 0, redeemLockUntil: now + LOCK_MS } : { redeemFails: fails }, { merge: true });
         return { err: [400, "bad_code", "الكود غير صحيح أو سبق استخدامه أو تم إلغاؤه."] as const };
@@ -34,7 +34,7 @@ export async function POST(req: Request) {
       const ents: Entitlement[] = grant(user.entitlements, code.subject, code.days, id, now);
       tx.set(userRef, { entitlements: ents, redeemFails: 0 }, { merge: true });
       tx.update(codeRef, { status: "used", usedBy: u.uid, usedByName: user.name || order?.name || u.name, usedByPhone: user.phone || order?.phone || "", usedByEmail: u.email, usedAt: now });
-      if (orderRef && order && order.status !== "cancelled") tx.update(orderRef, { status: "activated", activatedAt: now });
+      if (orderRef) tx.update(orderRef, { status: "activated", activatedAt: now });
       return { ok: true as const, entitlements: ents, now };
     });
 

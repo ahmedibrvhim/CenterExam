@@ -34,7 +34,7 @@ function adminApp(): App {
 }
 export const db = () => getFirestore(adminApp());
 
-const adminEmails = () => (process.env.ADMIN_EMAILS || "").split(/[,\s;]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
+export const adminEmails = () => (process.env.ADMIN_EMAILS || "").split(/[,\s;]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
 
 export type AuthedUser = { uid: string; email: string; name: string; picture: string; isAdmin: boolean };
 

@@ -18,7 +18,7 @@ export default function Header({ subject, onChangeSubject }: { subject?: Subject
   const main = active.find((e) => e.subject === "all") ?? [...active].sort((a, b) => b.expiresAt - a.expiresAt)[0];
   const extra = main && main.subject !== "all" ? active.length - 1 : 0;
   const left = main ? daysLeft(main, now) : 0;
-  const sub = isAdmin ? { cls: "ok", text: "👑 مدير · كل المواد" }
+  const sub = isAdmin ? { cls: "ok", text: "👑 مدير" }
     : main ? { cls: left <= 3 ? "warn" : "ok", text: `${entLabel(main.subject)}${extra ? ` +${extra}` : ""} · ${days(left)}` }
     : order ? { cls: "warn", text: "طلب قيد التفعيل" }
     : { cls: "bad", text: "غير مشترك" };
