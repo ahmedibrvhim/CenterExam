@@ -20,7 +20,10 @@ let auth: Auth | null = null;
 export function getFirebaseAuth(): Auth | null {
   if (typeof window === "undefined" || !firebaseConfigured) return null;
   if (!auth) {
-    app = getApps().length ? getApp() : initializeApp(config);
+    // On a real domain, sign in through OUR domain (proxied by next.config.mjs rewrites) so Safari/iOS does not partition the storage.
+    // Set NEXT_PUBLIC_FIREBASE_AUTH_PROXY=0 to go back to the plain <project>.firebaseapp.com handler.
+    const own = process.env.NEXT_PUBLIC_FIREBASE_AUTH_PROXY !== "0" && !/^(localhost|127\.|192\.168\.|10\.)/.test(location.hostname);
+    app = getApps().length ? getApp() : initializeApp(own ? { ...config, authDomain: location.host } : config);
     auth = getAuth(app);
     setPersistence(auth, browserSessionPersistence).catch(() => {});
   }
