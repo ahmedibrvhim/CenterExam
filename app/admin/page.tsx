@@ -5,15 +5,20 @@ import { authFetch } from "@/lib/authFetch";
 import { SUBJECTS } from "@/lib/subjects";
 import { CURRENCY, ORDER_STATUS_LABEL, PRICE, daysLeft, entLabel, formatCode, isActive, isOpenOrder, type CodeDoc, type OrderDoc, type Plan, type UserDoc } from "@/lib/plans";
 
-type Overview = { now: number; codes: CodeDoc[]; users: UserDoc[]; orders: OrderDoc[] };
+type Overview = { now: number; codes: CodeDoc[]; users: UserDoc[]; orders: OrderDoc[]; warning?: string };
 const fmt = (t?: number) => (t ? new Date(t).toLocaleDateString("ar-EG", { year: "numeric", month: "short", day: "numeric" }) : "—");
 const STATUS: Record<CodeDoc["status"], string> = { unused: "غير مستخدم", used: "مستخدم", revoked: "ملغي" };
 
 async function api(url: string, method: string, body?: object): Promise<{ ok: boolean; data: any }> {
   try {
     const r = await authFetch(url, { method, cache: "no-store", ...(body ? { headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : {}) });
-    return { ok: r.ok, data: await r.json().catch(() => ({})) };
-  } catch { return { ok: false, data: { error: "تعذّر الاتصال بالخادم." } }; }
+    const text = await r.text();
+    let data: any = {};
+    try { data = JSON.parse(text); } catch { data = { error: `رد غير متوقع من الخادم (HTTP ${r.status}). افتح Vercel ← Logs لمعرفة السبب.` }; }
+    if (!r.ok && !data.error) data.error = `فشل الطلب (HTTP ${r.status}).`;
+    if (!r.ok) data.error = `${data.error}${data.code ? ` [${data.code}]` : ""} — HTTP ${r.status}`;
+    return { ok: r.ok, data };
+  } catch (e) { return { ok: false, data: { error: `تعذّر الاتصال بالخادم (${(e as Error)?.message || "network"}).` } }; }
 }
 const copy = (t: string) => navigator.clipboard?.writeText(t).catch(() => {});
 const waTo = (phone: string) => `https://wa.me/${phone.replace(/\D/g, "").replace(/^0/, "20")}`;
@@ -46,6 +51,7 @@ export default function AdminPage() {
         <a href="/" className="btn-ghost">‹ الأداة</a>
       </div>
       {err && <p className="login-err" role="alert">{err}</p>}
+      {data?.warning && <p className="login-err" role="alert">{data.warning}</p>}
       {data && <Stats d={data} />}
       <div className="tabs" role="tablist">
         <button role="tab" aria-selected={tab === "orders"} className={tab === "orders" ? "on" : ""} onClick={() => setTab("orders")}>الطلبات{!!data && data.orders.some((o) => o.status === "pending") && <span className="tab-badge">{data.orders.filter((o) => o.status === "pending").length}</span>}</button>

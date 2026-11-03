@@ -1,0 +1,29 @@
+import { db, handle, requireAdmin } from "@/lib/server/admin";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+export async function GET(req: Request) {
+  return handle(async () => {
+    await requireAdmin(req);
+    // codes + users are required; if the orders query fails the page still opens (empty orders + a warning) instead of going blank
+    const [codes, users, orders] = await Promise.allSettled([
+      db().collection("codes").orderBy("createdAt", "desc").limit(1000).get(),
+      db().collection("users").limit(2000).get(),
+      db().collection("orders").orderBy("createdAt", "desc").limit(1000).get(),
+    ]);
+    if (codes.status === "rejected") throw codes.reason;
+    if (users.status === "rejected") throw users.reason;
+    if (orders.status === "rejected") console.error("orders query failed", orders.reason);
+    return {
+      now: Date.now(),
+      codes: codes.value.docs.map((d) => d.data()),
+      orders: orders.status === "fulfilled" ? orders.value.docs.map((d) => d.data()) : [],
+      warning: orders.status === "rejected" ? `تعذّر تحميل الطلبات: ${String((orders.reason as any)?.message ?? orders.reason).slice(0, 200)}` : "",
+      users: users.value.docs.map((d) => {
+        const x = d.data();
+        return { uid: x.uid ?? d.id, email: x.email ?? "", displayName: x.displayName ?? "", photoURL: x.photoURL ?? "", name: x.name ?? "", phone: x.phone ?? "", createdAt: x.createdAt ?? 0, entitlements: x.entitlements ?? [] };
+      }),
+    };
+  });
+}
