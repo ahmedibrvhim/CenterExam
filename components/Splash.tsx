@@ -61,7 +61,7 @@ export default function Splash() {
       <div className="splash-center">
         <div className="splash-emblem"><Emblem animated size={132} /></div>
 
-        <h1 className="splash-name" aria-label="CenterExam">
+        <h1 className="splash-name" dir="ltr" aria-label="Center Exam">
           {WORDS.map((w, i) => (
             <span key={w} className="word" style={{ "--d": `${0.9 + i * 0.18}s` } as CSSProperties} aria-hidden="true">{w}</span>
           ))}

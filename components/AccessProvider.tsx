@@ -23,6 +23,7 @@ async function call(url: string, body?: object): Promise<{ ok: boolean; data: an
   try {
     const r = await authFetch(url, body ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), cache: "no-store" } : { cache: "no-store" });
     const data = await r.json().catch(() => ({}));
+    if (!r.ok && !data.error) data.error = `تعذّر الاتصال بالخادم (رمز ${r.status}). تأكد من إضافة متغيرات Vercel ثم أعد النشر.`;
     return { ok: r.ok, data };
   } catch { return { ok: false, data: { code: "network", error: "تعذّر الاتصال بالخادم. تحقّق من الإنترنت وحاول مرة أخرى." } }; }
 }

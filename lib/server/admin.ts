@@ -28,7 +28,8 @@ function adminApp(): App {
   if (ex) return (app = ex);
   const c = loadCreds();
   if (!c) throw new ApiError(503, "server_not_configured", "الخادم غير مُهيَّأ بعد: أضف المتغير FIREBASE_SERVICE_ACCOUNT في إعدادات Vercel ثم أعد النشر.");
-  app = initializeApp({ credential: cert(c) });
+  try { app = initializeApp({ credential: cert(c) }); }
+  catch { throw new ApiError(503, "bad_service_account", "مفتاح الخدمة FIREBASE_SERVICE_ACCOUNT غير صالح: الصق محتوى ملف JSON كاملًا (من { إلى }) ثم أعد النشر."); }
   return app;
 }
 export const db = () => getFirestore(adminApp());
@@ -61,6 +62,9 @@ export async function handle(fn: () => Promise<Response | object>): Promise<Resp
   } catch (e) {
     if (e instanceof ApiError) return NextResponse.json({ code: e.code, error: e.message }, { status: e.status });
     console.error("api error", e);
+    const c = (e as any)?.code, m = String((e as any)?.message ?? "");
+    if (c === 5 || /NOT_FOUND/.test(m)) return NextResponse.json({ code: "firestore_missing", error: "قاعدة Firestore غير موجودة: من Firebase افتح Firestore Database ثم Create database." }, { status: 503 });
+    if (c === 7 || /PERMISSION_DENIED|has not been used|disabled/i.test(m)) return NextResponse.json({ code: "firestore_denied", error: "الخادم لا يملك صلاحية Firestore: تأكد أن Firestore مُفعّل وأن مفتاح الخدمة يخص نفس المشروع centerexam-e0b07." }, { status: 503 });
     return NextResponse.json({ code: "server_error", error: "حدث خطأ في الخادم. حاول مرة أخرى." }, { status: 500 });
   }
 }
