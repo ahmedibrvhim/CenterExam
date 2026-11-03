@@ -4,6 +4,7 @@ import { classify } from "@/lib/geminiErrors";
 import { markDayLimit, readState } from "@/lib/store";
 import { msUntilPacificMidnight } from "@/lib/limits";
 import { ApiError, requireUser } from "@/lib/server/admin";
+import { getUserKey } from "@/lib/server/userKey";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -13,15 +14,17 @@ export const dynamic = "force-dynamic";
 // so the request counter and the "limit reached" state can be kept separately for every key.
 // With ?probe=1 it also sends ONE tiny request per model to Google to learn whether this key has already hit its limit (e.g. used on another device).
 export async function GET(req: Request) {
-  const key = process.env.GEMINI_API_KEY;
+  // the key is the signed-in teacher's own key: no sign-in -> no key
+  let key: string | null = null;
+  if (req.headers.get("authorization")) {
+    try { key = (await getUserKey(await requireUser(req)))?.key ?? null; }
+    catch (e) { if (e instanceof ApiError) return NextResponse.json({ code: e.code, error: e.message }, { status: e.status }); throw e; }
+  }
   if (!key) return NextResponse.json({ hasKey: false, id: "none" });
   const id = createHash("sha256").update(key).digest("hex").slice(0, 12);
   const shared = await readState(id); // null when no shared database is configured
   const extra = shared ? { shared: true, usage: shared.usage, dayLeftMs: shared.dayLeftMs } : { shared: false };
   if (new URL(req.url).searchParams.get("probe") !== "1") return NextResponse.json({ hasKey: true, id, ...extra });
-
-  // the probe spends real Gemini requests: signed-in users only
-  try { await requireUser(req); } catch (e) { if (e instanceof ApiError) return NextResponse.json({ code: e.code, error: e.message }, { status: e.status }); throw e; }
 
   // each model has its own free quota: the key counts as "out" only when every model we try says so
   const models = ["gemini-flash-latest", "gemini-flash-lite-latest"];

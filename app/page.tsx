@@ -120,20 +120,23 @@ export default function Home() {
     syncKey();
     const onFocus = () => syncKey();
     window.addEventListener("focus", onFocus);
+    window.addEventListener("gemini-key-changed", onFocus);
     listExams().then(setExams).catch(() => notify("تعذّر فتح قاعدة البيانات المحلية (قد يكون المتصفح في وضع التصفح الخفي)", "error")).finally(() => setLoadingDb(false));
     try { navigator.storage?.persist?.(); } catch {} // ask the browser not to delete our data when disk space is low
-    return () => window.removeEventListener("focus", onFocus);
+    return () => { window.removeEventListener("focus", onFocus); window.removeEventListener("gemini-key-changed", onFocus); };
   }, []);
 
   // Which API key does the server use now? The request counter and the "limit reached" state belong to ONE key:
   // a different key starts from 0, and a key that already hit its limit (even from another device) shows it right away.
+  const [noKey, setNoKey] = useState(false); // this teacher has not added a Gemini key yet
   const syncKey = async () => {
     try {
-      const r = await fetch("/api/key", { cache: "no-store" });
+      const r = await authFetch("/api/key", { cache: "no-store" });
       const k = await r.json();
       const id: string = k.id || "none";
       if (id !== getKeyId()) { setKeyId(id); setLimit(getLimit()); setUsage(getUsage()); }
       setShared(!!k.shared);
+      setNoKey(!k.hasKey);
       if (k.shared) {
         setUsage(k.usage ?? 0);
         if (k.dayLeftMs > 0) { const l: Limit = { kind: "day", until: Date.now() + k.dayLeftMs }; saveLimit(l); setLimit(l); }
@@ -740,7 +743,15 @@ export default function Home() {
           <section className="card">
             <div className="card-header"><span className="qch-dot" /> إعدادات الاختبار</div>
             <div className="form">
-              <AiStatus limit={limit} usage={usage} shared={shared} />
+              {noKey ? (
+                <div className="ai-status bad" role="status">
+                  <span className="dot" />
+                  <div>
+                    <strong>أضف مفتاح Gemini الخاص بك لتوليد الأسئلة</strong>
+                    <small>المفتاح مجاني ويستغرق دقيقة. <button type="button" className="btn-ghost" onClick={() => window.dispatchEvent(new Event("open-gemini-key"))}>🔑 إضافة المفتاح</button></small>
+                  </div>
+                </div>
+              ) : <AiStatus limit={limit} usage={usage} shared={shared} />}
 
               <div className="fgroup">
                 <h3 className="fg-t"><i>1</i> بيانات الاختبار</h3>

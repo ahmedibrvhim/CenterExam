@@ -8,6 +8,7 @@ import { ALL_KINDS, BRANCH_LABEL, GRADE_ORD, STAGE_SHORT, type Branch, type Stag
 import { balanceCheck } from "@/lib/chem";
 import { hintsFor, norm } from "@/lib/analyze";
 import { ApiError, assertSubjectAccess, requireUser } from "@/lib/server/admin";
+import { getUserKey } from "@/lib/server/userKey";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -17,11 +18,13 @@ const DEADLINE_MS = 50_000; // stop talking to Gemini before Vercel kills the fu
 // Model names change over time (old ones get retired -> 404). So we ask Google which Flash models this key can use,
 // and try them in order. Each model has its own free quota, so if one is busy / slow / over its limit the next one is used.
 const FIRST_OUTPUT_MS = 22_000; // a model that writes nothing for this long is skipped
-let modelCache: { at: number; list: string[] } | null = null;
+const modelCache = new Map<string, { at: number; list: string[] }>();
 async function pickModels(apiKey: string): Promise<string[]> {
   const pinned = process.env.GEMINI_MODEL ? [process.env.GEMINI_MODEL] : [];
   let found: string[] = [];
-  if (modelCache && Date.now() - modelCache.at < 3_600_000) found = modelCache.list;
+  const ck = createHash("sha256").update(apiKey).digest("hex").slice(0, 12);
+  const mc = modelCache.get(ck);
+  if (mc && Date.now() - mc.at < 3_600_000) found = mc.list;
   else {
     try {
       const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", { headers: { "x-goog-api-key": apiKey }, signal: AbortSignal.timeout(5000) });
@@ -32,7 +35,7 @@ async function pickModels(apiKey: string): Promise<string[]> {
         .filter((n: string) => /^gemini-.*flash/.test(n) && !/(tts|image|live|audio|exp|robotics|computer|native|customtools|thinking)/.test(n));
       const rank = (n: string) => (n === "gemini-flash-latest" ? 0 : n === "gemini-flash-lite-latest" ? 1 : /preview/.test(n) ? 3 : 2);
       found = names.sort((x, y) => rank(x) - rank(y) || (y > x ? 1 : -1));
-      if (found.length) modelCache = { at: Date.now(), list: found };
+      if (found.length) { modelCache.set(ck, { at: Date.now(), list: found }); if (modelCache.size > 300) modelCache.clear(); }
     } catch {}
   }
   const fallback = ["gemini-flash-latest", "gemini-flash-lite-latest"];
@@ -295,17 +298,19 @@ const thinkingByModel: Record<string, number> = {}; // learned at runtime
 export async function POST(req: Request) {
   // only signed-in teachers whose subscription covers this subject may use the AI (and the Gemini key)
   let subjectReq = "";
+  let apiKey: string | null = null;
   try {
     const u = await requireUser(req);
     subjectReq = String(((await req.clone().json()) as { subject?: string })?.subject ?? "");
     await assertSubjectAccess(u, subjectReq);
+    apiKey = (await getUserKey(u))?.key ?? null; // THIS teacher's own Gemini key
   } catch (e) {
     if (e instanceof ApiError) return NextResponse.json({ code: e.code, error: e.message }, { status: e.status });
     return NextResponse.json({ code: "bad_request", error: "طلب غير صالح" }, { status: 400 });
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return NextResponse.json({ code: "no_key", error: "مفتاح GEMINI_API_KEY غير موجود. أضفه في إعدادات Vercel (Environment Variables) ثم أعد النشر." }, { status: 500 });
+  if (!apiKey) return NextResponse.json({ code: "no_key", error: "لم تضف مفتاح Gemini الخاص بك بعد. اضغط زر «🔑 مفتاح الذكاء الاصطناعي» في الأعلى والصق مفتاحك المجاني." }, { status: 400 });
+  const key: string = apiKey; // narrowed copy for the closures below
 
   let body: { context?: string; want?: Record<string, number>; avoid?: string[]; difficulty?: string; topic?: string; subject?: string; stage?: string; level?: number; branch?: string };
   try { body = await req.json(); } catch { return NextResponse.json({ code: "bad_request", error: "طلب غير صالح" }, { status: 400 }); }
@@ -340,7 +345,7 @@ TEXT:
 ${context}
 """`;
 
-  const keyId = createHash("sha256").update(apiKey).digest("hex").slice(0, 12);
+  const keyId = createHash("sha256").update(key).digest("hex").slice(0, 12);
   await addUsage(keyId); // shared counter (all devices) - only when a database is configured
 
   const ctrl = new AbortController();
@@ -352,7 +357,7 @@ ${context}
     fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`, {
       method: "POST",
       signal,
-      headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
+      headers: { "content-type": "application/json", "x-goog-api-key": key },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: SYSTEM }] },
         contents: [{ role: "user", parts: [{ text: prompt }] }],
@@ -373,7 +378,7 @@ ${context}
       const ext = new ObjectExtractor();
       let count = 0, buf = "";
       try {
-        const models = await pickModels(apiKey);
+        const models = await pickModels(key);
         let lastErr: { code: string; error: string; retryAfter?: number } | null = null;
         let finished = false, dayHits = 0;
         for (let mi = 0; mi < models.length && !finished; mi++) {

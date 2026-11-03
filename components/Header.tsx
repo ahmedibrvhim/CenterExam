@@ -1,4 +1,6 @@
 "use client";
+import { useEffect, useState } from "react";
+import GeminiKeyModal from "@/components/GeminiKeyModal";
 import ThemePicker from "@/components/ThemePicker";
 import Emblem from "@/components/Emblem";
 import { useAuth } from "@/components/AuthProvider";
@@ -10,6 +12,8 @@ export default function Header({ subject, onChangeSubject }: { subject?: Subject
   const s = getSubject(subject);
   const { user, signOut } = useAuth();
   const { openPlans, active, now, isAdmin, order } = useAccess();
+  const [keyOpen, setKeyOpen] = useState(false);
+  useEffect(() => { const f = () => setKeyOpen(true); window.addEventListener("open-gemini-key", f); return () => window.removeEventListener("open-gemini-key", f); }, []);
 
   // Subscription state shown in the bar: which subject(s) are open and how long is left.
   const main = active.find((e) => e.subject === "all") ?? [...active].sort((a, b) => b.expiresAt - a.expiresAt)[0];
@@ -46,9 +50,11 @@ export default function Header({ subject, onChangeSubject }: { subject?: Subject
           <button type="button" className={`sub-status ${sub.cls}`} onClick={() => openPlans(null, "details")} title={detail} aria-label={`حالة الاشتراك: ${sub.text} — اضغط لعرض التفاصيل`}>
             <span className="sub-dot" aria-hidden="true" />{sub.text}
           </button>
+          {user && <button type="button" className="btn-ghost" onClick={() => setKeyOpen(true)}>🔑 مفتاح الذكاء الاصطناعي</button>}
           {isAdmin && <a href="/admin" className="btn-ghost hdr-admin">الإدارة</a>}
         </div>
       </div>
+      {keyOpen && <GeminiKeyModal onClose={() => setKeyOpen(false)} />}
     </header>
   );
 }
