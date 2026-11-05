@@ -122,13 +122,16 @@ export function detectFromRanges(sources: Source[], subject?: string): Detected 
   const textForBranch = `${body} ${lessons.join(" ")} ${lessons.join(" ")}`; // lesson names count extra
   const count = (re: RegExp) => (textForBranch.match(re) ?? []).length;
   const sc = {
-    physics: count(/(?:القوه|السرعه|العجله|الكهربي|المقاومه|التيار|فولت|اوم|نيوتن|الشغل|القدره|الضوء|العدسه|الحرارة)/g),
+    physics: count(/(?:القوه|السرعه|العجله|الكهربي|المقاومه|التيار|فولت|اوم|نيوتن|الشغل|القدره|الضوء|العدسه|الحراره)/g),
     chemistry: count(/(?:ذره|عنصر|مركب|تفاعل|حمض|قاعده|محلول|الكترون|الجدول الدوري|مول|تاكسد|عامل مختزل|فلز)/g),
     biology: count(/(?:خليه|كائن|نبات|انسان|جهاز|هرمون|وراثه|الجين|كروموسوم|التمثيل الضوئي|الدم|القلب)/g),
     geology: count(/(?:صخور|معدن|زلزال|بركان|الارض|الغلاف الصخري|التجويه|الحفريات)/g),
   };
   const ranked = (Object.entries(sc) as Array<[Branch, number]>).sort((a, b) => b[1] - a[1]);
-  const branch: Branch = subject === "math" ? "general" : ranked[0][1] >= 6 && ranked[0][1] >= (ranked[1][1] || 0) * 1.4 ? ranked[0][0] : "general";
+  // Egypt: science is ONE integrated subject ("علوم") in the primary and prep stages - physics / chemistry / biology / geology
+  // are separate books only in secondary. So a branch is only ever picked for secondary (never when the stage is prep/primary).
+  const branch: Branch = subject === "math" || stage === "primary" || stage === "prep" ? "general"
+    : ranked[0][1] >= 6 && ranked[0][1] >= (ranked[1][1] || 0) * 1.4 ? ranked[0][0] : "general";
 
   const sig = extractSignals(slice.join("\n"));
   const avail = evidenceFor(sig, slice.length, subject);
