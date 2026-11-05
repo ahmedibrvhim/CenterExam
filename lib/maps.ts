@@ -191,7 +191,7 @@ function labelDesc(line: string): string {
   return t.replace(/[\s:：،,;؛]+$/u, "").replace(/\s+/g, " ").trim();
 }
 const ASK_WORDS = new Set(["ما", "ماذا", "من", "اين", "كم", "اذكر", "اكتب", "حدد", "عدد", "عين", "بين", "وضح", "هل", "كيف", "لماذا", "ضع", "صف", "استخرج"]);
-export function extractLabelQuestions(text: string): string[] {
+export function extractLabelBlock(text: string): { at: number; items: string[] } | null {
   const lines = text.split("\n");
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
@@ -213,19 +213,12 @@ export function extractLabelQuestions(text: string): string[] {
     // a real label list has dotted lines for the answers: without them a numbered list is ordinary questions (the generic reader below takes those)
     const withLeader = items.filter((x) => x.leader).length;
     if (items.length < 2 || withLeader < 2 || withLeader * 2 < items.length) continue;
-    const out: string[] = [];
-    items.forEach(({ d }, k) => {
-      const q = `اكتب اسم (${/^\S+$/.test(d) && !/^ال/.test(d) ? "ال" + d : d}) الذي يشير إليه الرقم (${k + 1}) على الخريطة.`;
-      if (!out.includes(q)) out.push(q);
-    });
-    return out;                                                                     // the first map block of the page is enough
+    return { at: i, items: items.map((x) => x.d) };                                // the first map block of the page is enough
   }
-  return [];
+  return null;
 }
 
 export function extractMapQuestions(text: string): string[] {
-  const label = extractLabelQuestions(text);
-  if (label.length) return label;                      // the book gave a label list: those ARE the map questions (the generic reader would only add noise)
   const lines = text.split("\n").map((l) => l.replace(/\s+/g, " ").trim()).filter((l) => letters(l) >= 2 && !/^[0-9٠-٩\s.\-–]+$/.test(l));
   // lines -> items: a numbered line starts a new item; other lines continue the item above until it ends with . ؟ ? : !
   const items: Array<{ t: string; bullet: boolean }> = [];
@@ -259,3 +252,41 @@ export function extractMapQuestions(text: string): string[] {
   });
   return out.slice(0, 8);
 }
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// The WHOLE question set of one map, as the exam prints it under the picture:
+//   (أ) أمامك خريطة ... من خلالها أجب عما يأتي:          a = ["خزان", "أحد روافد نهر النيل", ...]   (the numbers are drawn on the map)
+//   (ب) اكتب ما تشير إليه كل عبارة مما يأتي:              b = ["أحد منابع نهر النيل ويقع في وسط إفريقيا.", ...]
+// Only what the BOOK PAGE really asks is taken: nothing is invented. A map whose page has no questions has an empty set (and is not used).
+// ---------------------------------------------------------------------------------------------------------------------------
+export type MapSet = { a: string[]; b: string[] };
+const PART_B_INTRO = /(?:تشير|اكتب ما|ما تشير|ما يشير)/;
+const NEW_PART = /(?:اختر|ماذا|ما المقصود|قارن|علل|اكمل|اكمل|صوب|ما النتائج|عرف|رتب|صل)/;
+export function extractMapSet(text: string): MapSet {
+  const lines = text.split("\n");
+  const blk = extractLabelBlock(text);
+  let a: string[] = [];
+  let from = 0;
+  if (blk) { a = blk.items.slice(0, 8); from = blk.at + 1; }
+  else a = extractMapQuestions(text).slice(0, 6);                                   // an ordinary page: the questions the book asks about its map
+  // part B: "اكتب ما تشير إليه كل عبارة ..." followed by numbered statements, until the next part of the page
+  const b: string[] = [];
+  for (let i = from; i < lines.length; i++) {
+    const l = lines[i];
+    if (!PART_B_INTRO.test(plain(l)) || !/(?:كل عبار|عبار)/.test(plain(l))) continue;
+    for (let j = i + 1, miss = 0; j < lines.length && b.length < 8; j++) {
+      const raw = lines[j];
+      if (!raw.trim()) continue;
+      if (LETTER_BULLET.test(raw) || NEW_PART.test(plain(raw).slice(0, 40))) break;
+      if (!(NUM_BULLET.test(raw) || NUM_BULLET_OCR.test(raw))) { if (++miss > 0 && b.length) break; continue; }
+      const t = raw.replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, "").replace(/^[^\p{L}]+/u, "").replace(/\s+/g, " ").trim();
+      if (letters(t) >= 8 && t.length <= 160 && !b.includes(t)) b.push(t);
+    }
+    break;
+  }
+  return { a, b };
+}
+
+// Tesseract's most common Arabic slip on these pages: a dotted ي read as ب before ق / ر / ة ("إفربقيا", "وبقع", "المصربة"). Used ONLY on text read by Tesseract.
+export const fixOcrYa = (t: string): string =>
+  t.replace(/إفرب/g, "إفري").replace(/ربق/g, "ريق").replace(/(^|\s)وبقع/g, "$1ويقع").replace(/(^|\s)(ال)?مصرب/g, "$1$2مصري").replace(/(^|\s)يقع/g, "$1يقع");

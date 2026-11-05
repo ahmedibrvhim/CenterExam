@@ -7,6 +7,7 @@ import { authFetch } from "@/lib/authFetch";
 export type Q = {
   text: string; choices: string[]; kind: Kind; answer?: string; explanation?: string;
   mapId?: string; // "map" questions: the id of the map picture (Exam.maps) printed above them
+  part?: "a" | "b"; // "map" questions: (أ) the numbers on the map / the book's questions, (ب) "اكتب ما تشير إليه كل عبارة"
 };
 export type Exam = {
   id: string; title: string; sources: string[]; questions: Q[];
@@ -620,9 +621,21 @@ export function examHtml(e: Exam, v: string, key = false, teacher?: Teacher | nu
     if (g.kind !== "map") return g.qs.map(renderQ);
     const byMap = new Map<string, Q[]>();
     for (const q of g.qs) { const id = q.mapId ?? ""; byMap.set(id, [...(byMap.get(id) ?? []), q]); }
+    // ONE map with ITS OWN questions only, in the book's two parts: (أ) the numbers drawn on the map  /  (ب) write what each statement refers to.
+    // Items are numbered 1, 2, 3 inside each part (the numbers of part أ are the numbers on the picture); nothing else from the exam is mixed in.
+    const item = (q: Q, i: number, long: boolean) => {
+      const done = key && q.answer ? `<div class="model"><b>الإجابة:</b> ${esc(q.answer)}</div>` : "";
+      return `<section dir="auto"><p class="q"><span class="n">${i}</span><span class="qt">${T(q.text)}</span>${long ? "" : done ? "" : '<span class="tl"></span>'}</p>${long && !done ? '<div class="ln"></div>' : done}</section>`;
+    };
+    const head = (t: string) => `<p class="q"><span class="qt"><b>${t}</b></span></p>`;
     return [...byMap].flatMap(([id, list]) => {
       const src = e.maps?.[id];
-      return [...(src ? [`<div class="mapbox"><img src="${src}" alt=""></div>`] : []), ...list.map(renderQ)];
+      const pa = list.filter((q) => q.part !== "b"), pb = list.filter((q) => q.part === "b");
+      return [
+        ...(src ? [`<div class="mapbox"><img src="${src}" alt=""></div>`] : []),
+        ...(pa.length ? [head("(أ) أمامك خريطة، من خلالها أجب عما يأتي:"), ...pa.map((q, i) => item(q, i + 1, false))] : []),
+        ...(pb.length ? [head("(ب) اكتب ما تشير إليه كل عبارة مما يأتي:"), ...pb.map((q, i) => item(q, i + 1, true))] : []),
+      ];
     });
   };
   const groupBlocks = groups.flatMap((g, gi) => [

@@ -69,8 +69,8 @@ export default function ReviewPanel({ draft, onRemove, onRetry, onDrop, onConfir
               <div className="lq-main" dir="auto">
                 {s.state === "ok" && s.q && (
                   <>
-                    {s.q.mapId && draft.mapData?.find((m) => m.id === s.q!.mapId) && <img src={draft.mapData.find((m) => m.id === s.q!.mapId)!.dataUrl} alt="" style={{ maxWidth: "100%", maxHeight: 180, borderRadius: 6, border: "1px solid #bbb", marginBottom: 6 }} />}
-                    <p style={s.q.kind === "story" ? { whiteSpace: "pre-wrap" } : undefined}>{s.q.text}</p>
+                    {s.q.mapId && slots.findIndex((x) => x.q?.mapId === s.q!.mapId) === i && draft.mapData?.find((m) => m.id === s.q!.mapId) && <img src={draft.mapData.find((m) => m.id === s.q!.mapId)!.dataUrl} alt="" style={{ maxWidth: "100%", maxHeight: 180, borderRadius: 6, border: "1px solid #bbb", marginBottom: 6 }} />}
+                    <p style={s.q.kind === "story" ? { whiteSpace: "pre-wrap" } : undefined}>{s.q.kind === "map" ? `${s.q.part === "b" ? "(ب)" : "(أ)"} ${s.q.text}` : s.q.text}</p>
                     {s.q.kind === "story" && <ol dir="ltr">{s.q.choices.map((c, k) => <li key={k}>{c.replace(" ||| ", "  →  ")}</li>)}</ol>}
                     {s.q.kind === "mcq" && <ul>{s.q.choices.map((c, k) => <li key={k} className={c === s.q!.answer ? "ok" : ""}>{c}</li>)}</ul>}
                     {s.q.kind === "match" && <ul>{s.q.choices.map((c, k) => <li key={k} dir="auto">{c.replace(" ||| ", "  ⟷  ")}</li>)}</ul>}
@@ -85,7 +85,7 @@ export default function ReviewPanel({ draft, onRemove, onRetry, onDrop, onConfir
                 <span className="pill">{kindLabel(draft.subject, s.kind)}</span>
                 {s.state === "ok" && (
                   <>
-                    <button type="button" className="pv-del" onClick={() => onRemove(s.id)}>🗑 حذف واستبدال</button>
+                    {s.kind !== "map" && <button type="button" className="pv-del" onClick={() => onRemove(s.id)}>🗑 حذف واستبدال</button>}
                     <button type="button" className="pv-del" onClick={() => onDrop(s.id)}>✕ حذف فقط</button>
                   </>
                 )}
