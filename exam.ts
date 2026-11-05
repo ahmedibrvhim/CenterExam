@@ -507,7 +507,7 @@ const hashStr = (t: string) => { let h = 2166136261; for (let i = 0; i < t.lengt
 const MODEL_LABEL_AR: Partial<Record<Kind, string>> = { reason: "التعليل", define: "التعريف", compare: "المقارنة", irab: "الإعراب", extract: "المستخرج", rhetoric: "الإجابة", list: "الإجابة", order: "الترتيب الصحيح", correct: "الصواب", rewrite: "الإجابة", vocab: "الإجابة", match: "التوصيل" };
 const MODEL_LABEL_EN: Partial<Record<Kind, string>> = { order: "Correct order", correct: "Correct sentence", rewrite: "Rewritten sentence", vocab: "Answer", match: "Matching", essay: "Model answer" };
 // how many answer lines a written question gets on the student copy
-const LINES: Partial<Record<Kind, number>> = { irab: 2, rhetoric: 2, list: 3, rewrite: 2, essay: 1 };
+const LINES: Partial<Record<Kind, number>> = { irab: 2, rhetoric: 2, list: 3, rewrite: 2, essay: 1, map: 2 };
 // multi-line model answers keep their line breaks
 const PRE_KINDS: Kind[] = ["compare", "list", "irab", "match"];
 const ORD = ["الأول", "الثاني", "الثالث", "الرابع", "الخامس", "السادس", "السابع", "الثامن", "التاسع", "العاشر", "الحادي عشر", "الثاني عشر"];

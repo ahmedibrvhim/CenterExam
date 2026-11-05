@@ -14,14 +14,14 @@ import { listExams, removeExam, saveExam } from "@/lib/db";
 import { isTrial } from "@/lib/plans";
 import { Fail, streamBatch } from "@/lib/ai";
 import { detectFromRanges } from "@/lib/detect";
-import { hasMapWord, mapHint } from "@/lib/maps";
+import { extractMapQuestions, hasMapWord } from "@/lib/maps";
 import { scanMaps } from "@/lib/mapscan";
 import { extractSignals, type Signals } from "@/lib/analyze";
 import { ALL_KINDS, BRANCH_LABEL, GROUP_LABEL, GROUP_ORDER, STAGE_LABEL, defaultCounts, getSubject, gradeName, kindStatus, zeroCounts, zeroTexts, type Avail, type Branch, type Kind, type Stage, type SubjectId } from "@/lib/subjects";
 import { Limit, fmtDuration, getKeyId, getLimit, getUsage, isKeySeen, markKeySeen, msUntilPacificMidnight, recordRequest, saveLimit, setKeyId } from "@/lib/limits";
 
 // a map cut out of a page of the book (social studies): printed on the exam above the "map" questions
-type MapItem = { id: string; fileId: string; page: number; dataUrl: string; hint: string };
+type MapItem = { id: string; fileId: string; page: number; dataUrl: string; questions: string[] }; // questions = the book's own questions about this map, copied from the page
 type SrcFile = { id: string; name: string; size: number; file: File; pages?: string[]; progress?: [number, number] };
 type ToastState = { msg: string; kind: "success" | "error" | "info" } | null;
 
@@ -329,7 +329,15 @@ export default function Home() {
           for (let p = r.from; p <= r.to; p++) if (hasMapWord(f.pages![p - 1] ?? "")) pgs.push(p);
           if (!pgs.length) continue;
           const shots = await scanMaps(f.file, pgs.slice(0, 40), ctrl.signal);
-          shots.forEach((m, i) => found.push({ id: `${f.id.slice(0, 6)}-p${m.page}-${i}`, fileId: f.id, page: m.page, dataUrl: m.dataUrl, hint: mapHint(f.pages![m.page - 1] ?? "") }));
+          // the questions printed on the same page belong to the first (largest) map of the page; when the page has none, the next page may carry them
+          const seenPage = new Set<number>();
+          shots.forEach((m, i) => {
+            if (seenPage.has(m.page)) return;
+            seenPage.add(m.page);
+            let qs = extractMapQuestions(f.pages![m.page - 1] ?? "");
+            if (!qs.length && m.page < r.to) qs = extractMapQuestions(f.pages![m.page] ?? "");
+            if (qs.length) found.push({ id: `${f.id.slice(0, 6)}-p${m.page}-${i}`, fileId: f.id, page: m.page, dataUrl: m.dataUrl, questions: qs });
+          });
           if (found.length >= 8) break;
         }
         if (!ctrl.signal.aborted) setMaps(found.slice(0, 8));
@@ -341,7 +349,8 @@ export default function Home() {
   const avail: Avail | null = (() => {
     const a = detected?.avail ?? null;
     if (!a || !isSocial) return a;
-    return { ...a, map: { ok: maps.length > 0, n: maps.length, suggest: maps.length ? Math.min(6, maps.length * 2) : 0, why: mapBusy ? "جارٍ البحث عن الخرائط في صفحات الكتاب…" : "لم يُعثر على خريطة في الصفحات المحددة" } };
+    const nq = maps.reduce((n, m) => n + m.questions.length, 0);   // map questions are copied from the book: there are as many as the book has
+    return { ...a, map: { ok: nq > 0, n: nq, suggest: Math.min(6, nq), why: mapBusy ? "جارٍ البحث عن الخرائط في صفحات الكتاب…" : "لم يُعثر على خريطة مع أسئلتها في الصفحات المحددة" } };
   })();
   const fileKey = selected.join(",");
   useEffect(() => { touchedCounts.current = false; setForced([]); attempted.current = new Set(); }, [fileKey, subject?.id]); // new files or subject -> start again
@@ -466,7 +475,6 @@ export default function Home() {
     setTimeout(() => genRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50);
 
     const posCount = [0, 0, 0, 0, 0, 0];
-    let mapCursor = 0; // the map questions are spread over the maps found, one map per request
     const balance = (q: Q): Q => placeAnswer(q, posCount);
     const push = (q: Q) => {
       const k = normQ(q.text);
@@ -478,45 +486,13 @@ export default function Home() {
     let end: { phase: Gen["phase"]; message?: string } = { phase: "done" };
     let passStart = 0;
     let lastReq = 0; // free Gemini allows only ~5 requests/minute on 2.5-flash: keep ~12.5s between requests so we do not hit the per-minute limit
-    // ---- map questions: their own small requests (a picture makes a request slower, so it must never share one with the text questions) ----
-    // A map request that fails is skipped (after a short wait): the exam is finished without those questions instead of stopping.
+    // ---- map questions: NO AI. The map picture and the book's own questions about it were cut out of the PDF (lib/maps.ts); they go on the exam as they are. ----
     let mapNote = "", stopAll = false;
-    const waitTurn = async () => { const wait = lastReq + 12500 - Date.now(); if (lastReq && wait > 0) await sleep(wait, ctrl.signal); lastReq = Date.now(); };
-    const mapPhase = async () => {
-      let fails = 0;
-      for (let i = 0; i < 12 && quota.map - have.map > 0 && maps.length && fails < 3; i++) {
-        const mp = maps[mapCursor % maps.length];
-        let ctx = (pagesOf[mp.fileId]?.[mp.page - 1] ?? "").trim();
-        if (ctx.length < 250) ctx = (ctx + "\n\n" + groups[0].map((c) => c.text).join("\n\n")).trim();
-        const before = have.map;
-        try { await waitTurn(); } catch { end = { phase: "stopped" }; stopAll = true; return; }
-        { const n = recordRequest(); setUsage((u) => (shared ? u + 1 : n)); }
-        setGen((g) => (g ? { ...g, message: "جارٍ كتابة أسئلة الخريطة…" } : g));
-        let fail: Fail | null;
-        try {
-          fail = await streamBatch({ context: ctx.slice(0, 6000), want: { map: Math.min(3, quota.map - have.map) }, avoid: got.slice(-40).map((q) => q.text), difficulty, topic: topic.trim(), subject: subject?.id, stage, level, branch, focus, age, maps: [{ id: mp.id, dataUrl: mp.dataUrl, hint: mp.hint }] }, ctrl.signal, push);
-        } catch {
-          if (ctrl.signal.aborted) { end = { phase: "stopped" }; stopAll = true; return; }
-          fail = { code: "network", message: "تعذّر الاتصال بالخادم." };
-        }
-        mapCursor++;                                    // the next try uses the next map
-        if (!fail) { fails = have.map > before ? 0 : fails + 1; continue; }
-        if (fail.code === "rate_day") {
-          const l: Limit = { kind: "day", until: Date.now() + msUntilPacificMidnight() };
-          saveLimit(l); setLimit(l);
-          end = { phase: "partial", message: `انتهى الحد اليومي المجاني للذكاء الاصطناعي. يتجدد بعد ${fmtDuration(l.until - Date.now())} تقريبًا.` }; stopAll = true; return;
-        }
-        fails++;
-        if (["rate_minute", "busy", "timeout", "network"].includes(fail.code)) {
-          const secs = clamp(fail.retryAfter ?? 10, 5, 45);
-          setLimit({ kind: fail.code === "rate_minute" ? "minute" : "busy", until: Date.now() + secs * 1000, why: `${fail.code}: ${fail.message}` });
-          try { await sleep(secs * 1000, ctrl.signal); } catch { end = { phase: "stopped" }; stopAll = true; setLimit(getLimit()); return; }
-          setLimit(getLimit());
-        } else { mapNote = fail.message; return; }      // a real error (bad key ...): the text questions will report it
-      }
-      if (quota.map - have.map > 0 && !mapNote) mapNote = "تعذّر كتابة بعض أسئلة الخريطة (الخادم مزدحم) — أعد المحاولة لاحقًا لإضافتها";
-    };
-    if (quota.map > 0 && maps.length) await mapPhase();
+    if (quota.map > 0 && maps.length) {
+      const pool = maps.flatMap((m) => m.questions.map((t) => ({ id: m.id, t })));
+      if (pool.length < quota.map) { mapNote = `في الكتاب ${pool.length} سؤال خريطة فقط (المطلوب ${quota.map})`; quota.map = pool.length; }
+      for (const it of pool) { if (have.map >= quota.map) break; push({ kind: "map", text: it.t, choices: [], answer: "", mapId: it.id }); }
+    } else quota.map = 0;
     let consecutive = 0; // groups of the book in a row that failed because the AI was busy: after 3 the run stops and keeps what it has
     outer: for (let i = 0; i < groups.length * 4 && missing() > 0 && !stopAll; i++) {
       const gi = i % groups.length;
@@ -544,9 +520,7 @@ export default function Home() {
         for (const k of Object.keys(wantNow)) want[k] = Math.max(1, Math.ceil(wantNow[k] / (attempt + 1)));
         let fail: Fail | null;
         try {
-          const mp = null as MapItem | null;
-          fail = await streamBatch({ context: groups[gi].map((c) => c.text).join("\n\n"), want, avoid, difficulty, topic: topic.trim(), subject: subject?.id, stage, level, branch, focus, age, maps: mp ? [{ id: mp.id, dataUrl: mp.dataUrl, hint: mp.hint }] : undefined }, ctrl.signal, push);
-          if (mp && !fail) mapCursor++;
+          fail = await streamBatch({ context: groups[gi].map((c) => c.text).join("\n\n"), want, avoid, difficulty, topic: topic.trim(), subject: subject?.id, stage, level, branch, focus, age }, ctrl.signal, push);
         } catch {
           if (ctrl.signal.aborted) { end = { phase: "stopped" }; break outer; }
           fail = { code: "network", message: "تعذّر الاتصال بالخادم. تأكد أن التطبيق ما زال يعمل." };
@@ -601,7 +575,7 @@ export default function Home() {
       message: message || undefined, phase: end.phase as Draft["phase"],
       groups: groups.map((g) => g.map((c) => c.text).join("\n\n")),
       difficulty, topic: topic.trim(), removed: [], target: count, subject: subject?.id, stage, level, branch, focus, age,
-      mapData: maps.map((m) => ({ id: m.id, dataUrl: m.dataUrl, hint: m.hint })),
+      mapData: maps.map((m) => ({ id: m.id, dataUrl: m.dataUrl, questions: m.questions })),
     };
     draftAbort.current?.abort();
     draftAbort.current = new AbortController();
@@ -631,7 +605,19 @@ export default function Home() {
   const writeBatch = async (ids: string[], sig: AbortSignal) => {
     const d = draftRef.current;
     if (!d) return;
-    const slots = ids.map((id) => d.sets.flat().find((x) => x.id === id)).filter((x): x is Slot => !!x);
+    const allSlots = ids.map((id) => d.sets.flat().find((x) => x.id === id)).filter((x): x is Slot => !!x);
+    // map questions are never written by the AI: a replacement is another question the book asks about its maps
+    const mapSlots = allSlots.filter((x) => x.kind === "map");
+    if (mapSlots.length) {
+      const used = new Set([...d.sets.flat().flatMap((x) => (x.q ? [x.q.text] : [])), ...d.removed].map(normQ));
+      const pool = (d.mapData ?? []).flatMap((m) => (m.questions ?? []).map((t) => ({ id: m.id, t }))).filter((x) => !used.has(normQ(x.t)));
+      for (const sl of mapSlots) {
+        const it = pool.shift();
+        if (it) patchSlot(sl.id, { state: "ok", err: undefined, q: { kind: "map", text: it.t, choices: [], answer: "", mapId: it.id } });
+        else patchSlot(sl.id, { state: "failed", err: "لا توجد أسئلة خريطة أخرى في الكتاب" });
+      }
+    }
+    const slots = allSlots.filter((x) => x.kind !== "map");
     if (!slots.length) return;
     const need: Record<string, number> = {};
     for (const sl of slots) need[sl.kind] = (need[sl.kind] ?? 0) + 1;
@@ -653,8 +639,7 @@ export default function Home() {
         { const n = recordRequest(); setUsage((u) => (shared ? u + 1 : n)); }
         lastReplRef.current = Date.now();
         fail = await streamBatch(
-          { context: d.groups[order[a % order.length]], want, avoid, difficulty: d.difficulty, topic: d.topic, subject: d.subject, stage: d.stage, level: d.level, branch: d.branch, focus: d.focus, age: d.age,
-            maps: want.map ? (() => { const pool = d.mapData ?? []; const keep = slots.find((x) => x.kind === "map" && x.mapId)?.mapId; const m = pool.find((x) => x.id === keep) ?? pool[Math.floor(Math.random() * pool.length)]; return m ? [m] : undefined; })() : undefined },
+          { context: d.groups[order[a % order.length]], want, avoid, difficulty: d.difficulty, topic: d.topic, subject: d.subject, stage: d.stage, level: d.level, branch: d.branch, focus: d.focus, age: d.age },
           sig,
           (q) => { if (collected[q.kind] && collected[q.kind].length < (need[q.kind] ?? 0) && !taken(q.text)) collected[q.kind].push(q); },
         );
@@ -720,7 +705,6 @@ export default function Home() {
     if (!s || s.state !== "ok" || !s.q) return;
     const text = s.q.text;
     patchDraft((d) => ({ ...d, removed: [...d.removed, text] }));
-    if (s.q.mapId) patchSlot(id, { mapId: s.q.mapId }); // the replacement is asked about the same map
     writeReplacement(id);
   };
   const retryQuestion = (id: string) => { writeReplacement(id); };
@@ -958,7 +942,7 @@ export default function Home() {
                         {subject.kinds.filter((kd) => !kindStatus(kd, stage, level, avail).ok).map((kd) => <span key={kd.id} className="tag">{kd.label}</span>)}
                         {subject.kinds.every((kd) => kindStatus(kd, stage, level, avail).ok) && <span className="hint" style={{ margin: 0 }}>لا يوجد</span>}
                       </div>
-                      {isSocial && <div className="smart-row"><span>الخرائط</span>{mapBusy ? <span className="tag"><span className="spinner" /> جارٍ البحث عن الخرائط…</span> : maps.length ? maps.map((m) => <span key={m.id} className="tag on" title="خريطة قُصّت من صفحة الكتاب وستُطبع في الاختبار">🗺️ ص {m.page}</span>) : <span className="hint" style={{ margin: 0 }}>لا توجد خرائط في الصفحات المحددة</span>}</div>}
+                      {isSocial && <div className="smart-row"><span>الخرائط</span>{mapBusy ? <span className="tag"><span className="spinner" /> جارٍ البحث عن الخرائط…</span> : maps.length ? maps.map((m) => <span key={m.id} className="tag on" title="خريطة قُصّت من صفحة الكتاب مع أسئلتها، وستُطبع في الاختبار كما هي">🗺️ ص {m.page} · {m.questions.length} سؤال</span>) : <span className="hint" style={{ margin: 0 }}>لا توجد خرائط في الصفحات المحددة</span>}</div>}
                       {subject.id === "english" && age && <div className="smart-row"><span>سنّ القارئ</span><span className="tag" title="تُكتب القصة بهذا المستوى (من الصف الموجود في الكتاب، أو من صعوبة النص)">{age} سنة تقريبًا{gradeName(stage, level) ? ` · ${gradeName(stage, level)}` : " · من مستوى النص"}</span></div>}
                       {suggestTotal > 0 && <button type="button" className="btn-ghost" onClick={applySuggestion}>⚡ تطبيق الأعداد المقترحة ({suggestTotal} سؤال في النسخة)</button>}
                     </div>

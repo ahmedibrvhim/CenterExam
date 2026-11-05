@@ -141,3 +141,48 @@ export function mapHint(text: string, max = 700): string {
   });
   return [...keep].sort((a, b) => a - b).map((i) => lines[i]).join("\n").slice(0, max);
 }
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// The book's OWN questions about a map, copied from the text of the page (no AI): they are printed on the exam under the map.
+//   "ادرس الخريطة ثم أجب عما يأتي:  ١- ما اسم البحر الذي يحد مصر من الشمال؟  ٢- حدد موقع ..."
+// A question is taken when it names the map itself, or when it follows a line that tells the student to study the map.
+// ---------------------------------------------------------------------------------------------------------------------------
+const BULLET = /^\s*(?:\(?[0-9٠-٩]{1,2}\s*[-–.)\]]|\([0-9٠-٩]{1,2}\)|[أ-ي]\s*[-–.)])\s*/;
+const Q_WORD = /^(?:حدد|اذكر|اكتب|عدد|عين|بين|وضح|استخرج|قارن|ما|ماذا|من|اين|اي|كم|لماذا|كيف|هل|ضع|ارسم|لون|اختر|علل|فسر|سجل|استنتج|اكمل|صف|ظلل|املا|اكتشف|ماهي|ماهو)(?=\s|$)/;
+const plain = (t: string) => t.normalize("NFKC").replace(/[ً-ٟـ]/g, "").replace(/[أإآ]/g, "ا").replace(/ى/g, "ي");
+const letters = (t: string) => (t.match(/\p{L}/gu) ?? []).length;
+
+export function extractMapQuestions(text: string): string[] {
+  const lines = text.split("\n").map((l) => l.replace(/\s+/g, " ").trim()).filter((l) => letters(l) >= 2 && !/^[0-9٠-٩\s.\-–]+$/.test(l));
+  // lines -> items: a numbered line starts a new item; other lines continue the item above until it ends with . ؟ ? : !
+  const items: Array<{ t: string; bullet: boolean }> = [];
+  for (const l of lines) {
+    const bullet = BULLET.test(l);
+    const prev = items[items.length - 1];
+    if (!prev || bullet || /[؟?.:!؛]$/.test(prev.t)) items.push({ t: l.replace(BULLET, "").trim(), bullet });
+    else prev.t += " " + l;
+  }
+  const isQ = (t: string) => /[؟?]\s*$/.test(t) || Q_WORD.test(plain(t));
+  const out: string[] = [];
+  const add = (t: string) => {
+    const x = t.replace(/\s+/g, " ").trim();
+    if (letters(x) < 10 || x.length > 320) return;
+    if (/(?:صفحة|ص)\s*[0-9٠-٩]+/.test(x)) return;                  // "انظر صفحة ٤٥": the student has no book on the exam
+    if (!out.some((o) => plain(o) === plain(x))) out.push(x);
+  };
+  items.forEach((it, i) => {
+    if (!hasMapWord(it.t)) return;
+    const intro = /[:：]\s*$/.test(it.t) || /(?:ثم\s*)?(?:اجب|أجب)/.test(plain(it.t)) || /^(?:ادرس|لاحظ|تامل|تأمل|انظر|اقرا|اقرأ|بالرجوع|بالاعتماد|بالاستعانة)/.test(plain(it.t));
+    if (isQ(it.t) && !intro) { add(it.t); return; }
+    if (intro) {
+      // the numbered questions right under "ادرس الخريطة ثم أجب" belong to the map
+      for (let j = i + 1, taken = 0; j < items.length && taken < 8; j++) {
+        const n = items[j];
+        if (!n.bullet && !isQ(n.t)) break;
+        if (isQ(n.t) || (n.bullet && letters(n.t) >= 10)) { add(n.t); taken++; }
+      }
+      if (isQ(it.t) && /[؟?]\s*$/.test(it.t)) add(it.t);
+    }
+  });
+  return out.slice(0, 8);
+}

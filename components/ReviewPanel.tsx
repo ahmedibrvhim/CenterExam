@@ -17,7 +17,7 @@ export type Draft = {
   subject?: string; stage?: string | null; level?: number | null; branch?: string; focus?: string[]; // from the subject picker / file analysis (used again for replacement questions)
   removed: string[];         // texts of deleted questions, so the replacement is never the same question again
   age?: number | null;       // reading age of the pupils (stories)
-  mapData?: Array<{ id: string; dataUrl: string; hint: string }>; // maps found in the book (social studies)
+  mapData?: Array<{ id: string; dataUrl: string; questions?: string[] }>; // maps found in the book (social studies)
   target: number;
 };
 

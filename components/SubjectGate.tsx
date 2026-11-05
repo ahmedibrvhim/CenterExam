@@ -31,7 +31,6 @@ export default function SubjectGate({ onPick }: { onPick: (id: SubjectId) => voi
               <span className="gate-ico" aria-hidden="true">{s.icon}</span>
               <span className="gate-name">{s.name}</span>
             </span>
-            <span className="gate-scope" dir="auto">{s.scope}</span>
             <span className="gate-foot">
               {!ok ? <span className="gate-badge">{trialEnded ? "🔒 انتهت التجربة — اضغط للاشتراك" : lapsed(s.id) ? "🔒 انتهى اشتراكك — اضغط للتجديد" : "🔒 اضغط للاشتراك"}</span> : paid ? <span className="gate-badge ok">✓ مشترك · {isForever(paid) ? "دائم ∞" : `متبقٍّ ${leftText(paid, now)}`}</span> : <span className="gate-badge ok">✓ متاحة</span>}
             </span>
