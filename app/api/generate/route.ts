@@ -61,8 +61,8 @@ const SCHEMA = {
         properties: {
           type: { type: "STRING", enum: [...KINDS] },
           text: { type: "STRING", description: "The question. Must make sense on its own." },
-          choices: { type: "ARRAY", items: { type: "STRING" }, description: "mcq: exactly 4 options, no letter labels. every other type: empty array." },
-          answer: { type: "STRING", description: "mcq: the exact text of the correct choice. tf: 'true' or 'false'. reason/define/compare/essay: a short model answer. term: the term only. fill: the missing word(s) in order, separated by ' - '. problem/solve: the full worked solution ending with the final answer. balance/write: the final balanced equation." },
+          choices: { type: "ARRAY", items: { type: "STRING" }, description: "mcq: exactly 4 options, no letter labels. match: 4 or 5 pairs, each written 'item of column A ||| its match in column B'. every other type: empty array." },
+          answer: { type: "STRING", description: "mcq: the exact text of the correct choice. tf: 'true' or 'false'. reason/define/compare/essay/list/rhetoric: a short model answer. term: the term only. vocab: the one word asked for. fill: the missing word(s) in order, separated by ' - '. problem/solve: the full worked solution ending with the final answer. balance/write: the final balanced equation. match: the same pairs, one per line 'left ← right'. order: the correct sentence, or the events from first to last joined by ' ← '. irab/extract: the complete correct answer. correct/rewrite: the complete corrected / rewritten sentence." },
           explanation: { type: "STRING", description: "One sentence showing where the text supports the answer." },
         },
         required: ["type", "text", "choices", "answer", "explanation"],
@@ -131,21 +131,18 @@ const MATH_RULES = `- MATH EXCEPTION TO GROUNDING: you MAY (and should) invent N
 - mcq (اختر): a complete math question with exactly 4 choices and exactly one correct. Wrong choices are the results of common student mistakes (wrong sign, forgot a step, wrong operation, wrong unit) and look like the right one (same form and type). No two choices may be equal in value. answer = the exact text of the correct choice.
 - fill (أكمل): ONE short complete math statement or exercise in which the result or one missing number / expression (at most two blanks) is replaced by "______", e.g. "3/4 + 1/4 = ______", "إذا كان 2x + 3 = 11 فإن x = ______", "مساحة مستطيل طوله 8 سم وعرضه 5 سم = ______ سم²". The blank is a number, an expression or a unit-less result the student can find by a short calculation, never a linking word. The statement must have exactly one correct answer. choices = []. answer = the missing value(s) in the order of the blanks, separated by " - " (just the value, with its unit only if the blank asks for it).
 - solve (أجب عن الأسئلة): a question the student solves on paper. Start with a verb such as احسب / أوجد / حل / بسّط / اختصر / أوجد ناتج / جد. One short problem that asks for ONE final result (a word problem is allowed and may be 2-3 sentences). It must contain the given numbers. choices = []. answer = the worked solution, one step per line (the rule, the substitution, the result), ending with the final answer and its unit if any.`;
-// ---------- Arabic / Social studies / English (they use the general types mcq / tf / essay, but each subject now has its own rules) ----------
+// ---------- Arabic / Social studies / English: each subject has its own head, its own general rules and its own wording of every type ----------
 const LANG_HEAD: Record<string, string> = {
   arabic: "SUBJECT = Arabic language (اللغة العربية: نصوص، أدب، نحو، صرف، بلاغة، إملاء). Questions must test language skill and understanding, not memorising page layout.",
   social: "SUBJECT = Social studies (الدراسات الاجتماعية: تاريخ، جغرافيا، تربية وطنية). Questions must test knowledge and understanding of the lesson, not page layout.",
   english: "SUBJECT = English language. Write EVERY question, choice and answer in English (even if some book pages are in Arabic), and test English skill: vocabulary, grammar, reading comprehension, language functions.",
 };
-const LANG_RULES: Record<string, string[]> = {
+const LANG_COMMON: Record<string, string[]> = {
   arabic: [
     "- Identify what kind of text each part is (قراءة / نص أدبي / قاعدة نحوية / صرف / بلاغة / إملاء) and write the matching kind of question. Spread the questions over the different skills the text offers: meaning of words (مرادف / ضد / جمع / مفرد), comprehension, the writer's idea, grammar (الإعراب، نوع الجملة، الفاعل، المبتدأ والخبر...), morphology, rhetoric (تشبيه، استعارة، كناية), spelling.",
     "- LANGUAGE EXCEPTION TO GROUNDING: for grammar, morphology, rhetoric and spelling you MAY write NEW example sentences, but ONLY for the rules the text teaches, in the same style and difficulty as the book's examples. Facts about a text (its writer, its idea, its events) must come only from the text.",
     "- The student has NO book. Any question about a passage must QUOTE the needed word, line or sentence inside the question itself (between quotation marks). Never write \"في النص\" / \"في الفقرة\" / \"السطر الثاني\" without quoting.",
     "- Put full diacritics (التشكيل) on the words that grammar, morphology and spelling questions are about, and on any word that could be read in two ways. Write all other text with correct standard Arabic (فصحى), correct hamza / تاء / ألف مقصورة.",
-    "- mcq: for grammar and morphology the three wrong choices are the classic mistakes (another case ending, another part of speech, another form) and look like the right one. For vocabulary the choices are real Arabic words of the same type. Exactly one choice is correct under the rules the text teaches.",
-    "- tf: a statement about a rule, a word meaning or the text, fully true or fully false.",
-    "- essay (written answer): a short task such as أعرب ما تحته خط / استخرج من الجملة (فاعلًا، حالًا، مفعولًا به...) / ما معنى كذا / اشرح بيتًا أو عبارة / ما الفكرة العامة / ما نوع الأسلوب. The sentence to work on is written inside the question. answer = the full correct answer (for إعراب: the complete parsing of each word asked).",
     "- ACCURACY: grammar and rhetoric answers must be exactly right. If you are not sure of the إعراب or the figure of speech, do not write the question.",
   ],
   social: [
@@ -153,22 +150,56 @@ const LANG_RULES: Record<string, string[]> = {
     "- The student has NO book, map, picture or timeline. Never refer to \"الخريطة\" / \"الشكل\" / \"الصورة\" / \"الجدول\". Describe a place by its name and a date as a number in the question when needed.",
     "- NAMES, DATES AND NUMBERS must be copied exactly as the text gives them. Never change a date, a name or a number, and never invent one. If two sources in the text disagree, skip the question.",
     "- Every question names its exact subject (the country, the battle, the ruler, the river, the law...): never \"هذه الدولة\" / \"هذا الحدث\". Add the period or place when the same name could mean two things.",
-    "- mcq: the 3 wrong choices are real names, places, dates or terms from the SAME lesson and of the same kind as the right one (e.g. other rulers of the same era, other cities of the same region). Only one is correct.",
-    "- tf: a statement that is fully true or fully false. A false statement changes ONE key name, date, place or cause to a believable wrong one taken from the lesson.",
-    "- essay (written answer): ما أسباب / ما نتائج / اذكر / علّل / عدّد / ما أهمية / ما الفرق بين... Only things the text explains. answer = a short model answer listing the points (1-4 short points).",
   ],
   english: [
     "- Questions test English, written in English: vocabulary (meaning, synonym, antonym, odd one out), grammar (tenses, articles, prepositions, comparatives, conditionals, passive, question forms...), reading comprehension, and language functions (greetings, requests, advice, directions...). Match the mix to what the text teaches.",
     "- LANGUAGE EXCEPTION TO GROUNDING: for vocabulary and grammar you MAY write NEW sentences, but ONLY for the words and grammar points the text teaches, at the same level as the book. Facts about a reading passage must come only from the passage.",
     "- The student has NO book. A reading question must put the needed sentence INSIDE the question (quote it) before asking about it. Never write \"according to the text / passage\" without the quoted sentence.",
     "- Use simple, natural, correct English suitable for the grade. Use vocabulary the text uses. No slang, no idioms the book did not teach.",
-    "- mcq: for grammar the wrong choices are the typical learner mistakes (wrong tense, wrong form, wrong preposition) and look like the right one. EXACTLY ONE choice must be correct in the sentence. For vocabulary all choices are real English words of the same kind. Put a blank \"______\" inside the sentence for fill-in-the-blank items.",
-    "- tf: a statement about the passage or a language fact, fully true or fully false.",
-    "- essay (written answer): short tasks such as: Answer the question in a full sentence / Rewrite the sentence in the passive / Correct the underlined mistake / Put the verb in the correct tense / Make a question for the underlined words. The sentence to work on is written inside the question. answer = the correct full answer.",
     "- ACCURACY: every grammar answer must be exactly right. If a sentence could have two correct answers, rewrite it or skip it.",
   ],
 };
-function subjectRules(subject: string, stage: Stage | null, level: number | null, branch: Branch | null, types: string[]): string {
+// the types that are written the same way in every subject (the subject only changes the wording of the question)
+const MATCH_RULE = (head: string, what: string) => `- match (${head}): the text is exactly "${head}" and NOTHING else. choices = 4 or 5 pairs, each written "item of column A ||| its match in column B" (${what}). Every pair comes from the text. All items of column A are different, all items of column B are different, and no item of column B could also fit another item of column A. answer = the same pairs, one per line, written "A ← B".`;
+const LANG_KIND_RULES: Record<string, Record<string, string>> = {
+  arabic: {
+    mcq: "- mcq: for grammar and morphology the three wrong choices are the classic mistakes (another case ending, another part of speech, another form) and look like the right one. For vocabulary the choices are real Arabic words of the same type. Exactly one choice is correct under the rules the text teaches.",
+    tf: "- tf: a statement about a rule, a word meaning or the text, fully true or fully false.",
+    fill: "- fill (أكمل): ONE complete sentence, verse or rule from the text in which one key word (or the word the rule is about) is replaced by \"______\". The blank is a meaningful word or a grammatical form (never a linking word) and the sentence must make the answer unique. answer = the missing word(s) in the order of the blanks, separated by \" - \".",
+    match: MATCH_RULE("صل من العمود ( أ ) ما يناسبه من العمود ( ب ):", "word and meaning, word and opposite, singular and plural, poet and poem, term and definition"),
+    order: "- order (رتّب): the text is \"رتّب الكلمات الآتية لتكوّن جملة مفيدة:\" followed by the words of ONE sentence of the text (4 to 9 words) in a scrambled order separated by \" / \". The scrambled order must differ from the original. answer = the correct full sentence. Only sentences with ONE correct order.",
+    vocab: "- vocab (مفردات): ONE short question about ONE word of the text, written like \"ما مرادف كلمة ( يرِفّ )؟\" / \"اذكر ضد كلمة ( سعادة )\" / \"اكتب جمع كلمة ( قلم )\" / \"اكتب مفرد كلمة ( كُتُب )\". The word is between brackets with full diacritics; if it has more than one meaning, quote the sentence it appears in. answer = ONE word only (the one the text teaches). Never ask for a word that has several equally correct answers.",
+    reason: "- reason (علّل): the text MUST begin with \"علل:\" followed by the COMPLETE true statement to be explained, written inside the question (a rule, a spelling, a line of the text). answer = the cause in 1-2 sentences, taken from the text or from the rule it teaches.",
+    essay: "- essay (فهم واستيعاب): a short task such as ما معنى كذا / اشرح بيتًا أو عبارة / ما الفكرة العامة / ما المقصود بقوله / ما نوع الأسلوب / ما الدرس المستفاد. The sentence or line to work on is written inside the question. answer = the full correct answer (1-3 sentences).",
+    irab: "- irab (أعرب): the text starts with \"أعرب ما بين القوسين:\" followed by a complete sentence in which 1 or 2 words are written between ( ) and fully voweled, e.g. \"أعرب ما بين القوسين: (الطالبُ) مجتهدٌ.\" Use only the grammar the text teaches. answer = the full إعراب of each word between brackets: its type, its case or mood, and the sign of the case, e.g. \"الطالبُ: مبتدأ مرفوع وعلامة رفعه الضمة الظاهرة\". Each word is parsed in one line.",
+    extract: "- extract (استخرج): the text is \"استخرج من الجملة / من البيت الآتي ...\" naming EXACTLY what to extract (فاعلًا، مفعولًا به، حالًا، نعتًا، فعلًا مضارعًا، اسم فاعل، جمع تكسير، كلمة مرادفة لـ ...), and the sentence or line is written inside the question with full diacritics. What is asked for must exist exactly ONCE. answer = the extracted word(s) only.",
+    rhetoric: "- rhetoric (بلاغة): the text asks to identify or explain a figure of speech or style in a line written inside the question, e.g. \"وضّح الصورة البلاغية في قول الشاعر: «...»\" / \"ما نوع التشبيه في قولنا: ...؟\" / \"ما نوع الأسلوب في: ...؟\". Only figures the text teaches. answer = the name of the figure and one short explanation (what is compared with what / why). If you are not sure, skip it.",
+  },
+  social: {
+    mcq: "- mcq: the 3 wrong choices are real names, places, dates or terms from the SAME lesson and of the same kind as the right one (e.g. other rulers of the same era, other cities of the same region). Only one is correct.",
+    tf: "- tf: a statement that is fully true or fully false. A false statement changes ONE key name, date, place or cause to a believable wrong one taken from the lesson.",
+    fill: "- fill (أكمل): ONE complete statement from the text in which one key name, date, place, term or number is replaced by \"______\". The sentence must make the answer unique. answer = the missing word(s) in the order of the blanks, separated by \" - \".",
+    match: MATCH_RULE("صل من العمود ( أ ) ما يناسبه من العمود ( ب ):", "event and date, person and achievement, place and feature, term and meaning, country and capital"),
+    order: "- order (رتّب): the text is \"رتّب الأحداث الآتية ترتيبًا زمنيًا:\" (or \"... ترتيبًا منطقيًا:\" for the steps of a process) followed by 3 to 5 events of the text, each short but understandable WITHOUT its date, written in a scrambled order separated by \" / \". The scrambled order must differ from the right one. answer = the same events from first to last, joined by \" ← \". Only events whose order the text makes certain.",
+    term: "- term (اكتب المصطلح): the text starts with \"اكتب المصطلح:\" followed by ONE complete description taken from the text, WITHOUT the term itself or any word of it. answer = the term only (1-4 words) exactly as the book writes it.",
+    define: "- define (عرّف): the text is short: \"عرّف: <term>.\" where the term is a concept the text defines (a term, a treaty, a revolution, a feature...). answer = the book's definition in 1-2 sentences. Never ask to define something the text does not define.",
+    reason: "- reason (علّل): the text MUST begin with \"علل:\" followed by the COMPLETE true statement to be explained, written inside the question (e.g. \"علل: ازدهرت الزراعة على ضفاف نهر النيل.\"). The text must give its cause. answer = the cause in 1-2 sentences.",
+    compare: "- compare (قارن): the text is \"قارن بين <A> و <B> من حيث <aspect 1> و <aspect 2>.\" Both items and every aspect must be covered by the text. answer = one line per aspect, written \"<aspect>: <A> ... / <B> ...\". Only compare things the text really contrasts.",
+    list: "- list (اذكر / عدّد): the text starts with \"اذكر\" or \"عدّد\" and says HOW MANY, e.g. \"اذكر ثلاثة من أسباب قيام ثورة ١٩١٩.\" / \"عدّد مظاهر التنوع في ...\". The number asked is never more than the text lists. answer = the points one per line (all the points the text gives, up to 5).",
+  },
+  english: {
+    mcq: "- mcq: for grammar the wrong choices are the typical learner mistakes (wrong tense, wrong form, wrong preposition) and look like the right one. EXACTLY ONE choice must be correct in the sentence. For vocabulary all choices are real English words of the same kind. Put a blank \"______\" inside the sentence for fill-in-the-blank items.",
+    tf: "- tf: a statement about the passage or a language fact, fully true or fully false.",
+    fill: "- fill (complete): ONE complete English sentence from the text (or built on its grammar point) in which one word or phrase is replaced by \"______\". The sentence must make the answer unique. If the blank needs a verb, give the base form in brackets after the blank, e.g. \"She ______ (go) to school every day.\" answer = the missing word(s), separated by \" - \" if there are several blanks.",
+    match: MATCH_RULE("Match column ( A ) with column ( B ):", "word and meaning, word and opposite, word and picture description, question and answer"),
+    order: "- order (put in order): the text is \"Put the words in the correct order to make a sentence:\" followed by the words of ONE sentence of the text (4 to 9 words) in a scrambled order separated by \" / \". The scrambled order must differ from the original and the sentence must have ONE natural correct order. answer = the correct full sentence with a capital letter and a full stop.",
+    vocab: "- vocab (vocabulary): ONE short instruction about ONE word of the text, such as \"Write the synonym of ( enormous ).\" / \"Write the opposite of ( ancient ).\" / \"Write the plural of ( child ).\" / \"Write the past tense of ( buy ).\" The word is between brackets. answer = ONE word only. Never ask for a word that has several equally correct answers.",
+    essay: "- essay (answer the question): a reading or language question answered in ONE full sentence. The sentence or short paragraph it is about is written INSIDE the question. answer = the correct full-sentence answer.",
+    correct: "- correct (correct the mistake): the text is \"Correct the mistake:\" followed by ONE complete sentence that contains exactly ONE clear grammar or spelling mistake of a point the text teaches (wrong tense, wrong verb form, wrong preposition, missing -s, wrong word order...). answer = the whole sentence written correctly. The sentence has only ONE possible correction.",
+    rewrite: "- rewrite (rewrite as shown): the text is \"Rewrite the sentence as shown:\" followed by ONE complete sentence and, between brackets, what to do (make it negative / make it a question / use the passive / use reported speech / join with because, but, and / begin with ...). answer = the whole rewritten sentence. The task has ONE correct answer; add the first words (\"Begin with: ...\") when more than one wording is possible.",
+  },
+};
+function subjectRules(subject: string, stage: Stage | null, level: number | null, branch: Branch | null, types: string[], focus: string[] = []): string {
   if (subject === "math") {
     const m = ["SUBJECT = Mathematics (رياضيات). Questions must test mathematical skill, not memorising page layout."];
     if (stage) m.push(MATH_STAGE[stage]);
@@ -181,7 +212,9 @@ function subjectRules(subject: string, stage: Stage | null, level: number | null
     const m = [LANG_HEAD[subject]];
     if (stage) m.push(`STAGE = ${stage === "primary" ? "primary" : stage === "prep" ? "preparatory (middle)" : "secondary"} school.` + (level ? ` GRADE = ${GRADE_ORD[level - 1]} ${STAGE_SHORT[stage]}.` : "") + " Match exactly the level of this grade; no topics or difficulty from higher grades.");
     else m.push("The school stage is unknown: infer it from the vocabulary and difficulty of the text and write questions at that level.");
-    m.push(...LANG_RULES[subject]);
+    if (focus.length) m.push(`THE CHOSEN PAGES MOSTLY TEACH: ${focus.join(" / ")}. Write the questions from these areas, in proportion to how much of the text each one covers.`);
+    m.push(...LANG_COMMON[subject]);
+    for (const k of types) if (LANG_KIND_RULES[subject][k]) m.push(LANG_KIND_RULES[subject][k]);
     return "\n\nSUBJECT RULES:\n" + m.join("\n");
   }
   if (subject !== "science") return "";
@@ -211,99 +244,7 @@ function cleanText(t: string, math = false): string {
     .join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-type Raw = { type?: string; text?: string; choices?: unknown; answer?: string; explanation?: string };
-
-// A question that is too short, or ends in the middle of a sentence ("... في" / "... من"), is dropped.
-const DANGLING = /(?:^|\s)(?:في|من|إلى|الى|على|عن|مع|و|أو|او|ثم|التي|الذي|الذين|هل|ما|ماذا|كيف|لماذا|and|or|of|the|to|in|is|are|that|which)\s*$/i;
-// Questions that point at a text / picture / table the student does not have cannot be solved -> dropped.
-const AB = "(?<![\\u0621-\\u064A\\u0671-\\u06D3])", AE = "(?![\\u0621-\\u064A\\u0671-\\u06D3])"; // Arabic word start / end (so "نصف" is not mistaken for "نص")
-const REFERS_PARTS = [
-  `${AB}(?:في|من|بحسب|حسب|وفق|ب|ل)?\\s*(?:ال)?(?:نص|فقرة|درس|مقطع)${AE}`,
-  `${AB}(?:ال)?(?:مذكور|مذكورة|مذكورات|مذكورين|وارد|واردة|موضح|موضحة|مبين|مبينة|مرفق|مرفقة)${AE}`,
-  `${AB}(?:ال)?(?:شكل|جدول|صورة|رسم|مخطط|منحنى|خريطة)\\s*(?:ال)?(?:مقابل|سابق|اعلاه|أعلاه|ادناه|أدناه|التالي|الآتي|الاتي|بالأعلى|بالاسفل|بالأسفل)${AE}`,
-  `${AB}(?:أعلاه|اعلاه|أدناه|ادناه)${AE}`,
-  `${AB}(?:الشكل|الجدول|الصورة|الرسم)\\s*\\(?\\d`,
-  `${AB}(?:صفحة|ص)\\s*\\d+`,
-  "according to|\\bthe (?:text|passage|author|figure|table|diagram)\\b|\\bin the (?:text|book|passage|figure)\\b|\\bshown (?:above|below)\\b",
-];
-const REFERS_OUTSIDE = new RegExp(REFERS_PARTS.join("|"), "i");
-// math: "ص" is a variable (س، ص), so the page-number rule "ص 12" is left out
-const REFERS_MATH = new RegExp(REFERS_PARTS.filter((x) => !x.includes("(?:صفحة|ص)")).join("|"), "i");
-function looksIncomplete(t: string, short = false, math = false): boolean {
-  if ((math ? REFERS_MATH : REFERS_OUTSIDE).test(t)) return true;
-  const s = t.replace(/[\s؟?.:،,!]+$/u, "");
-  if ((s.match(/[\p{L}\p{N}]/gu) ?? []).length < (short ? 6 : 12)) return true;
-  if (s.split(/\s+/).length < (short ? 2 : 3)) return true;
-  return DANGLING.test(s);
-}
-
-function cleanOne(r: Raw, allowed: string[], math = false): Q | null {
-  const kind = r.type as Q["kind"];
-  let text = (r.text ?? "").trim();
-  if (!text || !allowed.includes(kind)) return null;
-  if (looksIncomplete(text, kind === "define" || math, math)) return null; // cut-off or too short to stand alone: better no question than a broken one
-  const explanation = (r.explanation ?? "").trim();
-  const answer = (r.answer ?? "").trim();
-  if (kind === "mcq") {
-    const choices = [...new Set((Array.isArray(r.choices) ? r.choices : []).map((c) => String(c).trim()).filter(Boolean))];
-    if (choices.length < 3 || !choices.includes(answer)) return null;
-    return { kind, text, choices, answer, explanation };
-  }
-  if (kind === "tf") {
-    const a = answer.toLowerCase();
-    if (a !== "true" && a !== "false") return null;
-    return { kind, text, choices: [], answer: a, explanation };
-  }
-  if (kind === "solve") {
-    if (!/[0-9٠-٩]/.test(text) || !/[0-9٠-٩]/.test(answer)) return null; // a math question needs given numbers and a numeric final answer
-    return { kind, text, choices: [], answer, explanation };
-  }
-  if (kind === "reason") {
-    if (answer.length < 8) return null;
-    if (!/^\s*علل/.test(text)) text = "علل: " + text;
-    return { kind, text, choices: [], answer, explanation };
-  }
-  if (kind === "problem") {
-    if (!/\d/.test(text) || answer.length < 6 || !/\d/.test(answer)) return null; // a problem needs given numbers and a worked numeric answer
-    return { kind, text, choices: [], answer, explanation };
-  }
-  if (kind === "balance") {
-    const given = text.split(/[:：]/).slice(1).join(":");
-    if (!/[→⟶]|->/.test(given) || !/[→⟶]|->/.test(answer)) return null;
-    if (balanceCheck(given) === true) return null;   // the equation given to the student is already balanced: no question
-    if (balanceCheck(answer) === false) return null; // the AI's answer is checked atom by atom: unbalanced -> dropped
-    return { kind, text, choices: [], answer, explanation };
-  }
-  if (kind === "write") {
-    if (/[→⟶]|->/.test(text)) return null;          // the question must not give the equation away
-    if (!/[→⟶]|->/.test(answer) || balanceCheck(answer) === false) return null;
-    return { kind, text, choices: [], answer, explanation };
-  }
-  if (kind === "term") {
-    if (answer.length < 2 || answer.split(/\s+/).length > 6) return null;
-    if (norm(text).includes(norm(answer))) return null;        // the question gives the term away
-    if (!/^\s*اكتب المصطلح/.test(text)) text = "اكتب المصطلح العلمي: " + text;
-    return { kind, text, choices: [], answer, explanation };
-  }
-  if (kind === "define") {
-    if (answer.length < 10) return null;
-    if (!/^\s*(?:عرف|عرّف|ما المقصود|ما تعريف)/.test(text)) text = "عرّف: " + text;
-    return { kind, text, choices: [], answer, explanation };
-  }
-  if (kind === "compare") {
-    if (answer.length < 15 || !/قارن|الفرق|ما الفرق/.test(text)) return null;
-    return { kind, text, choices: [], answer, explanation };
-  }
-  if (kind === "fill") {
-    text = text.replace(/(?:_\s*){3,}|\.{4,}|…{2,}|\(\s{2,}\)|\[\s*\]/g, "______");
-    const blanks = (text.match(/______/g) ?? []).length;
-    if (blanks < 1 || blanks > 3 || answer.length < 1) return null;
-    if (math && (!/[0-9٠-٩]/.test(text) || !/[0-9٠-٩a-zA-Zسصعمنلك√π]/.test(answer) || answer.length > 40)) return null; // a math blank needs given numbers and a short value as its answer
-    if (answer.split(/\s+-\s+/).length < blanks && blanks > 1) return null;
-    return { kind, text, choices: [], answer, explanation };
-  }
-  return { kind: "essay", text, choices: [], answer, explanation };
-}
+import { cleanOne, type Raw } from "@/lib/cleanQuestion";
 
 // Pulls complete {...} question objects out of a JSON text that arrives in small pieces.
 // Depth 1 is the outer { "questions": [...] }, depth 2 is one question.
@@ -358,7 +299,7 @@ export async function POST(req: Request) {
   if (!apiKey) return NextResponse.json({ code: "no_key", error: "لم تضف مفتاح Gemini الخاص بك بعد. اضغط زر «🔑 مفتاح الذكاء الاصطناعي» في الأعلى والصق مفتاحك المجاني." }, { status: 400 });
   const key: string = apiKey; // narrowed copy for the closures below
 
-  let body: { context?: string; want?: Record<string, number>; avoid?: string[]; difficulty?: string; topic?: string; subject?: string; stage?: string; level?: number; branch?: string };
+  let body: { context?: string; want?: Record<string, number>; avoid?: string[]; difficulty?: string; topic?: string; subject?: string; stage?: string; level?: number; branch?: string; focus?: string[] };
   try { body = await req.json(); } catch { return NextResponse.json({ code: "bad_request", error: "طلب غير صالح" }, { status: 400 }); }
 
   const isMath = body.subject === "math";
@@ -375,13 +316,20 @@ export async function POST(req: Request) {
   const level = LEVELS[body.difficulty ?? "mixed"] ?? LEVELS.mixed;
   const topic = (body.topic ?? "").trim().slice(0, 200);
   const avoid = (Array.isArray(body.avoid) ? body.avoid : []).map((s) => String(s).replace(/\s+/g, " ").trim().slice(0, 110)).filter(Boolean).slice(-40);
-  const NAMES: Record<string, string> = { term: "term (write the scientific term)", define: "define (عرّف)", compare: "compare (قارن)", fill: "fill (complete the blank)", mcq: "mcq (multiple choice)", tf: "tf (true/false)", essay: "essay (theoretical question)", reason: "reason (علل)", problem: "problem (numeric science problem)", solve: "solve (math question the student answers with a worked solution)", balance: "balance (balance a given chemical equation)", write: "write (write a balanced chemical equation from words)" };
+  const NAMES: Record<string, string> = {
+    term: body.subject === "science" ? "term (write the scientific term)" : "term (write the term)", define: "define (عرّف)", compare: "compare (قارن)", fill: "fill (complete the blank)", mcq: "mcq (multiple choice)", tf: "tf (true/false)",
+    essay: body.subject === "english" ? "essay (answer the question in a full sentence)" : body.subject === "arabic" ? "essay (comprehension: a short written answer)" : "essay (theoretical question)",
+    reason: "reason (علل)", problem: "problem (numeric science problem)", solve: "solve (math question the student answers with a worked solution)", balance: "balance (balance a given chemical equation)", write: "write (write a balanced chemical equation from words)",
+    match: "match (two columns: choices are 'A ||| B' pairs)", order: body.subject === "social" ? "order (put events in order)" : "order (scramble the words of a sentence)", vocab: "vocab (one word: synonym / opposite / plural / meaning)", list: "list (اذكر / عدّد)",
+    irab: "irab (parse the words between brackets)", extract: "extract (extract what is asked from a sentence)", rhetoric: "rhetoric (figure of speech / style)", correct: "correct (correct the mistake)", rewrite: "rewrite (rewrite the sentence as shown)",
+  };
   const stage = (["primary", "prep", "secondary"] as const).find((x) => x === body.stage) ?? null;
   const gradeNo = Number.isInteger(body.level) && body.level! >= 1 && body.level! <= 6 ? body.level! : null;
   const branch = (Object.keys(BRANCH_LABEL) as Branch[]).find((x) => x === body.branch) ?? null;
-  const rules = subjectRules(String(body.subject ?? ""), stage, gradeNo, branch, types);
+  const focus = (Array.isArray(body.focus) ? body.focus : []).map((x) => String(x).replace(/\s+/g, " ").trim().slice(0, 40)).filter(Boolean).slice(0, 6);
+  const rules = subjectRules(String(body.subject ?? ""), stage, gradeNo, branch, types, focus);
 
-  const hints = hintsFor(context, types, isMath ? "math" : undefined);
+  const hints = hintsFor(context, types, String(body.subject ?? "") || undefined);
   const prompt = `${rules ? rules.trim() + "\n\n" : ""}${hints ? hints + "\n" : ""}Write exactly ${n} questions, with exactly this many of each type:
 ${types.map((k) => `- ${NAMES[k]}: ${want[k]}`).join("\n")}
 Difficulty: ${level}.
@@ -473,7 +421,7 @@ ${context}
                 for (const obj of ext.push(piece)) {
                   let raw: Raw;
                   try { raw = JSON.parse(obj); } catch { continue; }
-                  const q = cleanOne(raw, types, isMath);
+                  const q = cleanOne(raw, types, isMath, String(body.subject ?? ""));
                   if (q) { count++; send({ t: "q", q }); }
                 }
               }

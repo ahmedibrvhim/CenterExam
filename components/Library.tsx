@@ -1,9 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 import { examSets, type Exam, type Q } from "@/exam";
-import { KIND_LABEL } from "@/lib/subjects";
+import { kindLabel } from "@/lib/subjects";
 
-const KIND = KIND_LABEL;
 const isAr = (s: string) => /[\u0600-\u06FF]/.test(s);
 
 
@@ -64,13 +63,14 @@ function Preview({ exam, onClose, onChange, onPrint }: { exam: Exam; onClose: ()
           {qs.map((q, i) => (
             <li key={i} className="pv">
               <div className="pv-top">
-                <b className="mono">{i + 1}</b><span className="pill">{KIND[q.kind]}</span>
+                <b className="mono">{i + 1}</b><span className="pill">{kindLabel(exam.subject, q.kind)}</span>
                 <button type="button" className="pv-del" onClick={() => removeAt(i)}>حذف السؤال</button>
               </div>
               <p dir="auto">{q.text}</p>
               {q.kind === "mcq" && <ul dir="auto">{q.choices.map((c, k) => <li key={k} className={c === q.answer ? "ok" : ""}>{c}</li>)}</ul>}
+              {q.kind === "match" && <ul dir="auto">{q.choices.map((c, k) => <li key={k}>{c.replace(" ||| ", "  ⟷  ")}</li>)}</ul>}
               {q.kind === "tf" && q.answer && <span className="lq-ans">✓ {q.answer === "true" ? (isAr(q.text) ? "صح" : "True") : isAr(q.text) ? "خطأ" : "False"}</span>}
-              {q.kind !== "mcq" && q.kind !== "tf" && q.answer && <p className="pv-ans" dir="auto" style={{ whiteSpace: "pre-wrap" }}>✓ {q.answer}</p>}
+              {q.kind !== "mcq" && q.kind !== "tf" && q.kind !== "match" && q.answer && <p className="pv-ans" dir="auto" style={{ whiteSpace: "pre-wrap" }}>✓ {q.answer}</p>}
               {q.explanation && <p className="pv-why" dir="auto">{q.explanation}</p>}
             </li>
           ))}

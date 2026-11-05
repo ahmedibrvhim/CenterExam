@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef } from "react";
 import type { Q } from "@/exam";
-import { KIND_LABEL } from "@/lib/subjects";
+import { kindLabel } from "@/lib/subjects";
 import { Limit, fmtClock, fmtDuration } from "@/lib/limits";
 import { useNow } from "@/components/useNow";
 
@@ -11,13 +11,12 @@ export type Gen = {
   startedAt: number; endedAt?: number; message?: string;
 };
 
-const KIND = KIND_LABEL;
 const TITLE: Record<Gen["phase"], string> = {
   writing: "جارٍ كتابة الأسئلة", done: "اكتمل الاختبار", partial: "اكتمل جزئيًا", stopped: "تم الإيقاف", failed: "تعذّر الإنشاء",
 };
 const isAr = (s: string) => /[\u0600-\u06FF]/.test(s);
 
-export default function GenerationPanel({ gen, limit, onStop, onClose }: { gen: Gen; limit: Limit; onStop: () => void; onClose: () => void }) {
+export default function GenerationPanel({ gen, limit, subject, onStop, onClose }: { gen: Gen; limit: Limit; subject?: string; onStop: () => void; onClose: () => void }) {
   const now = useNow(1000);
   const listRef = useRef<HTMLOListElement>(null);
   const running = gen.phase === "writing";
@@ -56,9 +55,10 @@ export default function GenerationPanel({ gen, limit, onStop, onClose }: { gen: 
                 <div className="lq-main" dir="auto">
                   <p>{q.text}</p>
                   {q.kind === "mcq" && <ul>{q.choices.map((c, k) => <li key={k} className={c === q.answer ? "ok" : ""}>{c}</li>)}</ul>}
+                  {q.kind === "match" && <ul>{q.choices.map((c, k) => <li key={k}>{c.replace(" ||| ", "  ⟷  ")}</li>)}</ul>}
                   {q.kind === "tf" && <span className="lq-ans">✓ {q.answer === "true" ? (isAr(q.text) ? "صح" : "True") : isAr(q.text) ? "خطأ" : "False"}</span>}
                 </div>
-                <span className="pill">{KIND[q.kind]}</span>
+                <span className="pill">{kindLabel(subject, q.kind)}</span>
               </li>
             ))}
           </ol>

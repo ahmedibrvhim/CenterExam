@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import type { Q } from "@/exam";
-import { KIND_LABEL } from "@/lib/subjects";
+import { kindLabel } from "@/lib/subjects";
 
 // One place in the exam. While the AI writes a replacement the slot is "loading".
 export type Slot = { id: string; kind: Q["kind"]; q?: Q; state: "ok" | "loading" | "failed"; err?: string };
@@ -14,12 +14,11 @@ export type Draft = {
   message?: string; phase: "done" | "partial" | "stopped";
   groups: string[];          // source text pieces, reused to write replacement questions
   difficulty: string; topic: string;
-  subject?: string; stage?: string | null; level?: number | null; branch?: string; // from the subject picker / file analysis (used again for replacement questions)
+  subject?: string; stage?: string | null; level?: number | null; branch?: string; focus?: string[]; // from the subject picker / file analysis (used again for replacement questions)
   removed: string[];         // texts of deleted questions, so the replacement is never the same question again
   target: number;
 };
 
-const KIND = KIND_LABEL;
 const isAr = (s: string) => /[\u0600-\u06FF]/.test(s);
 
 export default function ReviewPanel({ draft, onRemove, onRetry, onDrop, onConfirm, onDiscard }: {
@@ -70,15 +69,16 @@ export default function ReviewPanel({ draft, onRemove, onRetry, onDrop, onConfir
                   <>
                     <p>{s.q.text}</p>
                     {s.q.kind === "mcq" && <ul>{s.q.choices.map((c, k) => <li key={k} className={c === s.q!.answer ? "ok" : ""}>{c}</li>)}</ul>}
+                    {s.q.kind === "match" && <ul>{s.q.choices.map((c, k) => <li key={k} dir="auto">{c.replace(" ||| ", "  ⟷  ")}</li>)}</ul>}
                     {s.q.kind === "tf" && s.q.answer && <span className="lq-ans">✓ {s.q.answer === "true" ? (isAr(s.q.text) ? "صح" : "True") : isAr(s.q.text) ? "خطأ" : "False"}</span>}
-                    {s.q.kind !== "mcq" && s.q.kind !== "tf" && s.q.answer && <p className="pv-ans" style={{ whiteSpace: "pre-wrap" }}>✓ {s.q.answer}</p>}
+                    {s.q.kind !== "mcq" && s.q.kind !== "tf" && s.q.kind !== "match" && s.q.answer && <p className="pv-ans" style={{ whiteSpace: "pre-wrap" }}>✓ {s.q.answer}</p>}
                   </>
                 )}
-                {s.state === "loading" && <div className="gen-empty"><span className="spinner" /> يكتب الذكاء الاصطناعي سؤالًا بديلًا ({KIND[s.kind]})…</div>}
+                {s.state === "loading" && <div className="gen-empty"><span className="spinner" /> يكتب الذكاء الاصطناعي سؤالًا بديلًا ({kindLabel(draft.subject, s.kind)})…</div>}
                 {s.state === "failed" && <p className="rv-err">{s.err || "تعذّر كتابة سؤال بديل."}</p>}
               </div>
               <div className="lq-side">
-                <span className="pill">{KIND[s.kind]}</span>
+                <span className="pill">{kindLabel(draft.subject, s.kind)}</span>
                 {s.state === "ok" && (
                   <>
                     <button type="button" className="pv-del" onClick={() => onRemove(s.id)}>🗑 حذف واستبدال</button>

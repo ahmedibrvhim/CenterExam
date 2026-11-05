@@ -15,7 +15,7 @@ import { isTrial } from "@/lib/plans";
 import { Fail, streamBatch } from "@/lib/ai";
 import { detectFromRanges } from "@/lib/detect";
 import { extractSignals, type Signals } from "@/lib/analyze";
-import { ALL_KINDS, BRANCH_LABEL, STAGE_LABEL, defaultCounts, getSubject, gradeName, kindStatus, zeroCounts, zeroTexts, type Avail, type Branch, type Kind, type Stage, type SubjectId } from "@/lib/subjects";
+import { ALL_KINDS, BRANCH_LABEL, GROUP_LABEL, GROUP_ORDER, STAGE_LABEL, defaultCounts, getSubject, gradeName, kindStatus, zeroCounts, zeroTexts, type Avail, type Branch, type Kind, type Stage, type SubjectId } from "@/lib/subjects";
 import { Limit, fmtDuration, getKeyId, getLimit, getUsage, isKeySeen, markKeySeen, msUntilPacificMidnight, recordRequest, saveLimit, setKeyId } from "@/lib/limits";
 
 type SrcFile = { id: string; name: string; size: number; file: File; pages?: string[]; progress?: [number, number] };
@@ -31,6 +31,10 @@ const EVIDENCE: Partial<Record<Kind, (s: Signals) => number>> = {
   term: (s) => s.term.length + s.define.length, define: (s) => s.term.length + s.define.length,
   balance: (s) => s.equations.length, write: (s) => s.equations.length,
   problem: (s) => s.problems.length + s.laws.length,
+  irab: (s) => s.gram.length, rhetoric: (s) => s.rhet.length, extract: (s) => s.gram.length + s.rhet.length + s.glossary.length,
+  vocab: (s) => s.glossary.length + 1, match: (s) => s.glossary.length + s.term.length + s.define.length + s.dates.length,
+  order: (s) => s.dates.length + s.short.length, list: (s) => s.lists.length + s.reason.length,
+  correct: (s) => s.enGram.length + s.en * 0.2, rewrite: (s) => s.enGram.length + s.en * 0.2,
 };
 const MAX_PER_TYPE = 100;
 const DIFFS = [["mixed", "متنوع"], ["easy", "سهل"], ["medium", "متوسط"], ["hard", "صعب"]] as const;
@@ -294,6 +298,7 @@ export default function Home() {
   const stage: Stage | null = detected?.stage ?? null;
   const level: number | null = detected?.level ?? null;
   const branch: Branch = detected?.branch ?? "general";
+  const focus: string[] = detected?.focus ?? [];            // what the pages mostly teach (نحو / تواريخ / Grammar ...): given to the AI
   const avail: Avail | null = detected?.avail ?? null;
   const fileKey = selected.join(",");
   useEffect(() => { touchedCounts.current = false; setForced([]); attempted.current = new Set(); }, [fileKey, subject?.id]); // new files or subject -> start again
@@ -453,7 +458,7 @@ export default function Home() {
         for (const k of Object.keys(wantNow)) want[k] = Math.max(1, Math.ceil(wantNow[k] / (attempt + 1)));
         let fail: Fail | null;
         try {
-          fail = await streamBatch({ context: groups[gi].map((c) => c.text).join("\n\n"), want, avoid, difficulty, topic: topic.trim(), subject: subject?.id, stage, level, branch }, ctrl.signal, push);
+          fail = await streamBatch({ context: groups[gi].map((c) => c.text).join("\n\n"), want, avoid, difficulty, topic: topic.trim(), subject: subject?.id, stage, level, branch, focus }, ctrl.signal, push);
         } catch {
           if (ctrl.signal.aborted) { end = { phase: "stopped" }; break outer; }
           fail = { code: "network", message: "تعذّر الاتصال بالخادم. تأكد أن التطبيق ما زال يعمل." };
@@ -501,7 +506,7 @@ export default function Home() {
       title: title.trim() || stripPdf(chosen[0].name), sources: chosen.map((f) => f.name), grade: grade.trim() || undefined, info,
       message: message || undefined, phase: end.phase as Draft["phase"],
       groups: groups.map((g) => g.map((c) => c.text).join("\n\n")),
-      difficulty, topic: topic.trim(), removed: [], target: count, subject: subject?.id, stage, level, branch,
+      difficulty, topic: topic.trim(), removed: [], target: count, subject: subject?.id, stage, level, branch, focus,
     };
     draftAbort.current?.abort();
     draftAbort.current = new AbortController();
@@ -553,7 +558,7 @@ export default function Home() {
         { const n = recordRequest(); setUsage((u) => (shared ? u + 1 : n)); }
         lastReplRef.current = Date.now();
         fail = await streamBatch(
-          { context: d.groups[order[a % order.length]], want, avoid, difficulty: d.difficulty, topic: d.topic, subject: d.subject, stage: d.stage, level: d.level, branch: d.branch },
+          { context: d.groups[order[a % order.length]], want, avoid, difficulty: d.difficulty, topic: d.topic, subject: d.subject, stage: d.stage, level: d.level, branch: d.branch, focus: d.focus },
           sig,
           (q) => { if (collected[q.kind] && collected[q.kind].length < (need[q.kind] ?? 0) && !taken(q.text)) collected[q.kind].push(q); },
         );
@@ -754,7 +759,7 @@ export default function Home() {
             </section>
             {gen && (
               <div ref={genRef}>
-                <GenerationPanel gen={gen} limit={limit} onStop={() => abortRef.current?.abort()} onClose={() => setGen(null)} />
+                <GenerationPanel gen={gen} limit={limit} subject={subject?.id} onStop={() => abortRef.current?.abort()} onClose={() => setGen(null)} />
               </div>
             )}
             {draft && (
@@ -836,6 +841,7 @@ export default function Home() {
                         <span className="tag" title={detected.source === "lessons" ? "تم استنتاج المرحلة من أسماء الدروس (بدون استخدام الذكاء الاصطناعي)" : undefined}>{gradeName(stage, level) ?? (stage ? STAGE_LABEL[stage] : "الصف غير معروف")}{detected.source === "lessons" ? " (من أسماء الدروس)" : ""}</span>
                         {detected.lessons.length > 0 && <span className="tag" title={detected.lessons.slice(0, 12).join(" · ")}>{detected.lessons.length} درس / وحدة</span>}
                         {subject.id === "science" && <span className="tag">{BRANCH_LABEL[branch]}</span>}
+                        {focus.map((f) => <span key={f} className="tag" title="ما تركّز عليه الصفحات المحددة">{f}</span>)}
                         <span className="tag">{detected.pages} صفحة · {detected.facts} جملة معلومات</span>
                       </div>
                       <div className="smart-row">
@@ -855,8 +861,14 @@ export default function Home() {
 
               <div className="fgroup">
                 <h3 className="fg-t"><i>3</i> أسئلة الاختبار <small>عدد كل نوع في النسخة الواحدة</small></h3>
-                <div className="qcounts">
-                  {subject.kinds.map((kd) => {
+                {GROUP_ORDER.map((g) => {
+                  const list = subject.kinds.filter((kd) => kd.group === g);
+                  if (!list.length) return null;
+                  return (
+                    <div className="qgroup" key={g}>
+                      <h4 className="qg-t">{g === "skills" ? subject.skillsTitle : GROUP_LABEL[g]}</h4>
+                      <div className="qcounts">
+                        {list.map((kd) => {
                     const st = needRange && analysisReady ? kindStatus(kd, stage, level, avail) : { ok: true } as { ok: boolean; why?: string };
                     const on = !locked && (st.ok || forced.includes(kd.id));
                     const sug = avail?.[kd.id]?.suggest ?? 0;
@@ -869,11 +881,14 @@ export default function Home() {
                           onBlur={() => setCountText((p) => ({ ...p, [kd.id]: String(perType[kd.id]) }))} />
                         {locked ? null : !on
                           ? <span className="qc-why">{st.why}<button type="button" onClick={() => { touchedCounts.current = true; setForced((f) => [...f, kd.id]); setCountText((p) => ({ ...p, [kd.id]: "2" })); }}>تفعيل</button></span>
-                          : needRange && sug > 0 ? <span className="qc-hint">مقترح: {sug}</span> : kd.hint ? <span className="qc-hint">{kd.hint}</span> : null}
+                          : <>{kd.hint ? <span className="qc-hint">{kd.hint}</span> : null}{needRange && sug > 0 ? <span className="qc-sug">مقترح: {sug}</span> : null}</>}
                       </div>
                     );
                   })}
-                </div>
+                      </div>
+                    </div>
+                  );
+                })}
                 <p className="hint qsum">
                   {locked
                     ? "حدّد الصفحات أولًا — بعد التحليل تُفتح أنواع الأسئلة التي يدعمها الملف."

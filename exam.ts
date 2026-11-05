@@ -1,6 +1,6 @@
 import { CENTER_NAME, LOGO_DATA_URI } from "@/lib/logo";
 import { WM_ASPECT, WM_DATA_URI } from "@/lib/watermark";
-import { ALL_KINDS, SECTION_TITLE, type Kind } from "@/lib/subjects";
+import { ALL_KINDS, getSubject, kindOrder, sectionTitle, type Kind } from "@/lib/subjects";
 import { cleanMathText, linesFrom, readMathPage, type Engine, type Gray } from "@/lib/mathocr";
 export type Q = { text: string; choices: string[]; kind: Kind; answer?: string; explanation?: string };
 export type Exam = {
@@ -438,8 +438,19 @@ const AR = ["أ", "ب", "ج", "د", "هـ", "و"], EN = ["A", "B", "C", "D", "E"
 // Builds the exam as A4 "sheets" (HTML). key=false -> student copy (no answers). key=true -> same questions with the correct answers marked.
 // The sheets are then photographed and put in a real PDF file (see buildPdf) - the browser print dialog is never used,
 // so there are no extra lines, no blank pages and no differences between Chrome / Safari / phones.
-const SECTIONS: Array<{ kind: Q["kind"]; title: string }> = ALL_KINDS.map((k) => ({ kind: k, title: SECTION_TITLE[k] }));
-const ORD = ["الأول", "الثاني", "الثالث", "الرابع", "الخامس", "السادس"];
+const sectionsOf = (subject?: string): Array<{ kind: Q["kind"]; title: string }> => kindOrder(subject).map((k) => ({ kind: k, title: sectionTitle(subject, k) }));
+const ORD_EN = ["One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve"];
+// the English exam is printed in English: every English string is isolated (bdi) so punctuation and numbers keep their place inside the right-to-left sheet
+const bdi = (t: string) => `<bdi dir="ltr">${esc(t)}</bdi>`;
+const hashStr = (t: string) => { let h = 2166136261; for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
+// label shown before the model answer of a written question (teacher copy)
+const MODEL_LABEL_AR: Partial<Record<Kind, string>> = { reason: "التعليل", define: "التعريف", compare: "المقارنة", irab: "الإعراب", extract: "المستخرج", rhetoric: "الإجابة", list: "الإجابة", order: "الترتيب الصحيح", correct: "الصواب", rewrite: "الإجابة", vocab: "الإجابة", match: "التوصيل" };
+const MODEL_LABEL_EN: Partial<Record<Kind, string>> = { order: "Correct order", correct: "Correct sentence", rewrite: "Rewritten sentence", vocab: "Answer", match: "Matching", essay: "Model answer" };
+// how many answer lines a written question gets on the student copy
+const LINES: Partial<Record<Kind, number>> = { irab: 2, rhetoric: 2, list: 3, rewrite: 2, essay: 1 };
+// multi-line model answers keep their line breaks
+const PRE_KINDS: Kind[] = ["compare", "list", "irab", "match"];
+const ORD = ["الأول", "الثاني", "الثالث", "الرابع", "الخامس", "السادس", "السابع", "الثامن", "التاسع", "العاشر", "الحادي عشر", "الثاني عشر"];
 
 const SHEET_W = 210, SHEET_H = 296;    // mm: one A4 sheet
 const M_TOP = 12, M_SIDE = 15;         // mm: sheet margins
@@ -460,7 +471,8 @@ export function examHtml(e: Exam, v: string, key = false): string {
   const origin = typeof location !== "undefined" ? location.origin : "";
   const all = versionQuestions(e, v);
   // group by question type (MCQ, then true/false, then essay) and number continuously
-  const groups = SECTIONS.map((s) => ({ ...s, qs: all.filter((q) => q.kind === s.kind) })).filter((g) => g.qs.length);
+  const en = getSubject(e.subject)?.lang === "en";
+  const groups = sectionsOf(e.subject).map((s) => ({ ...s, qs: all.filter((q) => q.kind === s.kind) })).filter((g) => g.qs.length);
   let n = 0;
   const summary: string[] = [];
 
@@ -495,17 +507,33 @@ export function examHtml(e: Exam, v: string, key = false): string {
       extra = key && q.answer
         ? `<div class="model eq"><b>المعادلة الموزونة:</b> <bdi dir="ltr">${esc(q.answer)}</bdi></div>`
         : `<div class="ln"></div>`;
-    } else if (q.kind === "term") {
-      if (key && q.answer) extra = `<div class="model"><b>المصطلح:</b> ${esc(q.answer)}</div>`;
+    } else if (q.kind === "term" || q.kind === "vocab") {
+      const lab = q.kind === "term" ? "المصطلح" : ar ? "الإجابة" : "Answer";
+      if (key && q.answer) extra = `<div class="model"><b>${lab}:</b> ${ar ? esc(q.answer) : bdi(q.answer)}</div>`;
       else inline = `<span class="tl"></span>`;
     } else if (q.kind === "fill") {
-      extra = key && q.answer ? `<div class="model"><b>الإجابة:</b> ${T(q.answer)}</div>` : "";
+      extra = key && q.answer ? `<div class="model"><b>${ar ? "الإجابة" : "Answer"}:</b> ${T(q.answer)}</div>` : "";
+    } else if (q.kind === "match") {
+      // two columns: the items of column A are numbered, the items of column B are lettered in a fixed scrambled order (the same on every print)
+      const pairs = q.choices.map((c) => { const [a, ...r] = c.split("|||"); return [a.trim(), r.join("|||").trim()] as [string, string]; });
+      let order = shuffle(pairs.map((_, i) => i), rng(hashStr(q.text + pairs.map((p) => p[0]).join("|"))));
+      if (order.every((v, i) => v === i) && pairs.length > 1) order = [...order.slice(1), order[0]]; // never print the pairs side by side
+      const letterOf = (i: number) => L[order.indexOf(i)] ?? "";
+      const cell = (t: string) => (ar ? esc(t) : bdi(t));
+      const left = pairs.map((p, i) => `<div class="mi"><b>${i + 1}</b><span class="mb">${key ? letterOf(i) : ""}</span><span>${cell(p[0])}</span></div>`).join("");
+      const right = order.map((pi, k) => `<div class="mi"><b>${L[k] ?? k + 1}</b><span>${cell(pairs[pi][1])}</span></div>`).join("");
+      extra = `<div class="mt"><div class="mc">${left}</div><div class="mc">${right}</div></div>`;
+      if (key) extra += `<div class="model"><b>${ar ? "التوصيل" : "Matching"}:</b> ${pairs.map((_, i) => `${i + 1} ← ${letterOf(i)}`).join(ar ? " ، " : " , ")}</div>`;
     } else {
-      const label = q.kind === "reason" ? "التعليل" : q.kind === "define" ? "التعريف" : q.kind === "compare" ? "المقارنة" : "الإجابة النموذجية";
-      extra = key && q.answer ? `<div class="model${q.kind === "compare" ? " pre" : ""}"><b>${label}:</b> ${q.kind === "compare" ? "\n" : ""}${esc(q.answer)}</div>` : `<div class="ln"></div>`;
+      const label = (ar ? MODEL_LABEL_AR[q.kind] : MODEL_LABEL_EN[q.kind]) ?? (ar ? "الإجابة النموذجية" : "Model answer");
+      const pre = PRE_KINDS.includes(q.kind);
+      const lines = Array.from({ length: LINES[q.kind] ?? 1 }, () => `<div class="ln"></div>`).join("");
+      extra = key && q.answer ? `<div class="model${pre ? " pre" : ""}"><b>${label}:</b> ${pre ? "\n" : ""}${ar ? esc(q.answer) : bdi(q.answer)}</div>` : lines;
     }
-    const why = key && q.explanation && ["mcq", "tf"].includes(q.kind) ? `<p class="why"><b>التفسير:</b> ${isMath ? mathHtml(q.explanation) : esc(q.explanation)}</p>` : "";
+    const why = key && q.explanation && ["mcq", "tf"].includes(q.kind) ? `<p class="why"><b>${ar ? "التفسير" : "Explanation"}:</b> ${isMath ? mathHtml(q.explanation) : esc(q.explanation)}</p>` : "";
     let qText = q.kind === "fill" ? (isMath ? mathHtml(q.text).replace(/_{3,}/g, '<span class="bl"></span>') : blanks(q.text)) : T(q.text), eqLine = "";
+    if (q.kind === "match") qText = ar ? "اكتب حرف الإجابة المناسبة أمام كل رقم:" : "Write the letter of the answer next to each number:";
+    if (q.kind === "order" && /[:：]/.test(q.text) && !/منطق/.test(q.text.split(/[:：]/)[0])) qText = T(q.text.split(/[:：]/).slice(1).join(":").trim());
     if (q.kind === "balance") {
       const m = q.text.match(/^([\s\S]*?[:：])\s*([^:：]+)$/);
       if (m) { qText = esc(m[1]); eqLine = `<div class="eqline" dir="ltr">${esc(m[2].trim())}</div>`; }
@@ -515,29 +543,31 @@ export function examHtml(e: Exam, v: string, key = false): string {
 
   // flat list of blocks (header, headings, questions). The pager measures them and fills the sheets.
   const groupBlocks = groups.flatMap((g, gi) => [
-    `<h2><span>السؤال ${ORD[gi] ?? ""}: ${g.title}</span><span class="cnt">${g.qs.length} ${g.qs.length === 1 ? "سؤال" : "أسئلة"}</span></h2>`,
+    en
+      ? `<h2><span>${bdi(`Question ${ORD_EN[gi] ?? gi + 1}: ${g.title}`)}</span><span class="cnt">${bdi(`${g.qs.length} ${g.qs.length === 1 ? "question" : "questions"}`)}</span></h2>`
+      : `<h2><span>السؤال ${ORD[gi] ?? ""}: ${g.title}</span><span class="cnt">${g.qs.length} ${g.qs.length === 1 ? "سؤال" : "أسئلة"}</span></h2>`,
     ...g.qs.map(renderQ),
   ]);
   const total = all.length;
-  const keyBox = key && summary.length ? `<div class="sum"><h3>ملخص الإجابات</h3><div class="grid">${summary.join("")}</div></div>` : "";
+  const keyBox = key && summary.length ? `<div class="sum"><h3>${en ? bdi("Answer summary") : "ملخص الإجابات"}</h3><div class="grid">${summary.join("")}</div></div>` : "";
   const header = `<div class="hdr">
 <div class="top">
-  <div class="brand"><img src="${LOGO_DATA_URI}" alt=""><div><b>${CENTER_NAME}</b><small>${key ? "نموذج الإجابة" : "ورقة اختبار"}</small></div></div>
+  <div class="brand"><img src="${LOGO_DATA_URI}" alt=""><div><b>${CENTER_NAME}</b><small>${en ? bdi(key ? "Answer key" : "Exam paper") : key ? "نموذج الإجابة" : "ورقة اختبار"}</small></div></div>
   <div class="ttl"><h1>${esc(e.title)}</h1></div>
-  <div class="ver"><small>النموذج</small><span>${v}</span></div>
+  <div class="ver"><small>${en ? bdi("Model") : "النموذج"}</small><span>${v}</span></div>
 </div>
 ${key ? "" : `<div class="info">
-  <div class="w2"><i>اسم الطالب:</i><u></u></div>
-  <div><i>الفصل:</i><u></u></div>
-  <div class="sc"><i>الدرجة:</i><span class="box"></span><span>/ ${esc(e.grade || String(total))}</span></div>
+  <div class="w2"><i>${en ? bdi("Student's name:") : "اسم الطالب:"}</i><u></u></div>
+  <div><i>${en ? bdi("Class:") : "الفصل:"}</i><u></u></div>
+  <div class="sc"><i>${en ? bdi("Mark:") : "الدرجة:"}</i><span class="box"></span><span>/ ${esc(e.grade || String(total))}</span></div>
 </div>`}
 <div class="strip">
-  <span>عدد الأسئلة: <b>${total}</b></span>
-  <span>الدرجة الكلية: <b>${esc(e.grade || String(total))}</b></span>
-  <span class="tip">${key ? "نسخة المعلم — تحتوي على الإجابات الصحيحة" : "اقرأ كل سؤال بتمعّن قبل الإجابة، ولا تترك أي سؤال دون إجابة."}</span>
+  <span>${en ? `<bdi dir="ltr">Number of questions: <b>${total}</b></bdi>` : `عدد الأسئلة: <b>${total}</b>`}</span>
+  <span>${en ? `<bdi dir="ltr">Total mark: <b>${esc(e.grade || String(total))}</b></bdi>` : `الدرجة الكلية: <b>${esc(e.grade || String(total))}</b>`}</span>
+  <span class="tip">${en ? bdi(key ? "Teacher's copy — contains the correct answers" : "Read every question carefully and answer all of them.") : key ? "نسخة المعلم — تحتوي على الإجابات الصحيحة" : "اقرأ كل سؤال بتمعّن قبل الإجابة، ولا تترك أي سؤال دون إجابة."}</span>
 </div>
 </div>`;
-  const end = `<div class="end"><span>${key ? "نهاية نموذج الإجابة" : "انتهت الأسئلة — مع تمنياتنا لكم بالتوفيق"}</span></div>`;
+  const end = `<div class="end"><span>${en ? bdi(key ? "End of the answer key" : "End of the exam — Good luck!") : key ? "نهاية نموذج الإجابة" : "انتهت الأسئلة — مع تمنياتنا لكم بالتوفيق"}</span></div>`;
 
   // PAGER: runs inside the hidden exam page. Measures every block, then builds one .sheet per page:
   // [watermark image] + [the blocks that fit]. A heading is never left alone at the bottom of a sheet.
@@ -655,6 +685,10 @@ sup.pw{font-size:.68em;line-height:0;vertical-align:super}
 .opt.on{font-weight:800}.opt.on .bx{background:#111;color:#fff}
 .model.sol .sl{white-space:normal;min-height:1.5em}.model.pre{white-space:pre-wrap}.model.eq{font-size:14px}
 .ln{border-bottom:1.2px dashed #777;height:21px;margin:0 30px 0 0}
+.mt{display:flex;gap:26px;margin:4px 30px 3px 0;align-items:flex-start}.mc{flex:1 1 0;display:flex;flex-direction:column;gap:3px}
+.mi{display:flex;align-items:flex-start;gap:7px;padding:2px 8px;border:1px solid #bdbdbd;border-radius:5px;font-size:12.5px;line-height:1.45}
+.mi>b{flex:none;min-width:19px;height:19px;border:1.4px solid #111;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;margin-top:1px}
+.mi>.mb{flex:none;min-width:28px;height:19px;border-bottom:1.2px solid #111;text-align:center;font-weight:800;font-size:12px;line-height:19px}
 .tl{flex:none;align-self:flex-end;width:120px;border-bottom:1.2px dashed #777;height:16px;margin-right:6px}
 .bl{display:inline-block;min-width:70px;border-bottom:1.2px solid #111;height:1em;vertical-align:baseline;margin:0 3px}
 .model{margin:2px 30px 0 0;padding:4px 10px;background:#f1f1f1;border-right:3px solid #111;border-radius:3px;font-size:12.5px}

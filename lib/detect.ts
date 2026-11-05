@@ -6,7 +6,7 @@
 //   2. "text"    - the same phrase, or only the stage ("المرحلة الإعدادية"), anywhere in the chosen pages
 //   3. "lessons" - the LESSON / UNIT NAMES (headings and table-of-contents lines) matched against typical topics of each stage
 import type { Avail, Branch, Stage } from "@/lib/subjects";
-import { evidenceFor, extractSignals, norm } from "@/lib/analyze";
+import { evidenceFor, extractSignals, focusFor, norm } from "@/lib/analyze";
 
 export type DetectSource = "cover" | "text" | "lessons" | null;
 export type Detected = {
@@ -14,6 +14,7 @@ export type Detected = {
   avail: Avail; pages: number; facts: number;
   source: DetectSource;        // how the stage was found (null = not found)
   lessons: string[];           // lesson / unit names found in the pages
+  focus: string[];             // what the pages mostly teach (نحو / بلاغة / تواريخ وأحداث / Grammar ...), per subject
 };
 
 // norm() + the letters it leaves alone (ئ in "ابتدائي", ؤ) + Arabic-Indic digits
@@ -130,10 +131,10 @@ export function detectFromRanges(sources: Source[], subject?: string): Detected 
   const ranked = (Object.entries(sc) as Array<[Branch, number]>).sort((a, b) => b[1] - a[1]);
   // Egypt: science is ONE integrated subject ("علوم") in the primary and prep stages - physics / chemistry / biology / geology
   // are separate books only in secondary. So a branch is only ever picked for secondary (never when the stage is prep/primary).
-  const branch: Branch = subject === "math" || stage === "primary" || stage === "prep" ? "general"
+  const branch: Branch = (subject && subject !== "science") || stage === "primary" || stage === "prep" ? "general"
     : ranked[0][1] >= 6 && ranked[0][1] >= (ranked[1][1] || 0) * 1.4 ? ranked[0][0] : "general";
 
   const sig = extractSignals(slice.join("\n"));
   const avail = evidenceFor(sig, slice.length, subject);
-  return { stage, level, grade, branch, avail, pages: slice.length, facts: sig.facts, source, lessons };
+  return { stage, level, grade, branch, avail, pages: slice.length, facts: sig.facts, source, lessons, focus: focusFor(sig, subject) };
 }
