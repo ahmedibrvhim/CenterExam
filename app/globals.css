@@ -803,3 +803,27 @@ button.plan-card { cursor: pointer; font: inherit; color: inherit; transition: b
 .login-note { margin: 12px 0 0; font-size: 12px; line-height: 1.7; color: var(--text-3); }
 .link-btn { background: none; border: 0; padding: 0; font: inherit; color: var(--accent-2, var(--accent)); text-decoration: underline; cursor: pointer; }
 .login-warn a.btn-ghost { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+
+/* ---- navbar v3: two clean bars with one control height (36px) ---- */
+.site-header .hdr-main { max-width: 1180px; margin: 0 auto; padding: 8px 24px; display: flex; align-items: center; gap: 14px; min-height: 52px; }
+.site-header .brand { flex: 1 1 auto; min-width: 0; order: 0; }
+.hdr-tools { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; }
+.hdr-tools .theme-wrap { order: 0; }
+.hdr-tools .acct { order: 1; }
+.acct-btn { width: 36px; height: 36px; padding: 2px; }
+.acct-btn img, .acct-btn .user-ini { width: 30px; height: 30px; }
+.hdr-sub { border-bottom: 1px solid rgba(var(--accent-rgb), .14); background: rgba(var(--accent-rgb), .05); }
+.hdr-sub-in { max-width: 1180px; margin: 0 auto; padding: 7px 24px; display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 50px; }
+.hdr-nav { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1 1 auto; }
+.back-btn, .hdr-sub .sub-status { min-height: 36px; box-sizing: border-box; }
+.subject-now { min-width: 0; padding-inline-start: 12px; border-inline-start: 1px solid rgba(var(--accent-rgb), .35); font-size: 14px; }
+.subject-now .sn-txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.hdr-sub .sub-status { flex: 0 1 auto; min-width: 0; max-width: 55%; margin-inline-start: auto; }
+@media (max-width: 700px) {
+  .site-header .hdr-main { padding: 6px max(14px, env(safe-area-inset-right)) 6px max(14px, env(safe-area-inset-left)); gap: 10px; min-height: 48px; }
+  .hdr-sub-in { padding: 6px max(14px, env(safe-area-inset-right)) 6px max(14px, env(safe-area-inset-left)); gap: 8px; min-height: 46px; }
+  .hdr-nav { gap: 10px; }
+  .subject-now { padding-inline-start: 10px; font-size: 13px; }
+  .back-btn { padding: 4px 12px; }
+  .hdr-sub .sub-status { max-width: 50%; }
+}

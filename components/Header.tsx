@@ -35,46 +35,52 @@ export default function Header({ subject, onChangeSubject }: { subject?: Subject
     : { cls: "bad", text: "غير مشترك" };
   const detail = active.length ? active.map((e) => `${entLabel(e.subject)}${isTrial(e) ? " (تجربة)" : ""}: ${isForever(e) ? "دائم" : `متبقٍّ ${leftText(e, now)}`}`).join("\n") : "لا يوجد اشتراك فعّال";
   return (
-    <header className="site-header">
-      <div className="site-header-inner">
-        <a href="/" className="brand" aria-label="CenterExam">
-          <Emblem size={34} />
-          <span className="brand-name" dir="ltr">CenterExam</span>
-          <span className="brand-sub">مولّد امتحانات</span>
-        </a>
-        <p className="site-tagline">حوّل ملفات PDF إلى اختبارات بعدة نسخ</p>
-        <ThemePicker />
-        {user && (
-          <div className="acct" ref={acct}>
-            <button type="button" className="acct-btn" aria-label="حسابي" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((o) => !o)}>
-              {user.photoURL ? <img src={user.photoURL} alt="" referrerPolicy="no-referrer" width={30} height={30} /> : <span className="user-ini" aria-hidden="true">{(user.displayName || user.email || "?").slice(0, 1).toUpperCase()}</span>}
-            </button>
-            {menu && (
-              <div className="acct-menu" role="menu">
-                <div className="acct-who"><b>{profile?.name || user.displayName || "حسابي"}</b>{profile?.phone ? <small dir="ltr">{profile.phone}</small> : null}{user.email ? <small dir="ltr">{user.email}</small> : null}</div>
-                <button type="button" role="menuitem" className="acct-item" onClick={() => { setMenu(false); setProfileOpen(true); }}>✏️ تعديل الاسم والهاتف</button>
-                <button type="button" role="menuitem" className="acct-item" onClick={() => { setMenu(false); setKeyOpen(true); }}>🔑 مفتاح Gemini</button>
-                {isAdmin && <a role="menuitem" href="/admin" className="acct-item">👑 الإدارة</a>}
-                <button type="button" role="menuitem" className="acct-item danger" onClick={() => { setMenu(false); signOut(); }}>⎋ تسجيل الخروج</button>
+    <>
+      {/* bar 1 (sticky): the logo on one side, the theme and the account on the other */}
+      <header className="site-header">
+        <div className="hdr-main">
+          <a href="/" className="brand" aria-label="CenterExam">
+            <Emblem size={34} />
+            <span className="brand-name" dir="ltr">CenterExam</span>
+            <span className="brand-sub">مولّد امتحانات</span>
+          </a>
+          <div className="hdr-tools">
+            <ThemePicker />
+            {user && (
+              <div className="acct" ref={acct}>
+                <button type="button" className="acct-btn" aria-label="حسابي" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((o) => !o)}>
+                  {user.photoURL ? <img src={user.photoURL} alt="" referrerPolicy="no-referrer" width={32} height={32} /> : <span className="user-ini" aria-hidden="true">{(user.displayName || user.email || "?").slice(0, 1).toUpperCase()}</span>}
+                </button>
+                {menu && (
+                  <div className="acct-menu" role="menu">
+                    <div className="acct-who"><b>{profile?.name || user.displayName || "حسابي"}</b>{profile?.phone ? <small dir="ltr">{profile.phone}</small> : null}{user.email ? <small dir="ltr">{user.email}</small> : null}</div>
+                    <button type="button" role="menuitem" className="acct-item" onClick={() => { setMenu(false); setProfileOpen(true); }}>✏️ تعديل الاسم والهاتف</button>
+                    <button type="button" role="menuitem" className="acct-item" onClick={() => { setMenu(false); setKeyOpen(true); }}>🔑 مفتاح Gemini</button>
+                    {isAdmin && <a role="menuitem" href="/admin" className="acct-item">👑 الإدارة</a>}
+                    <button type="button" role="menuitem" className="acct-item danger" onClick={() => { setMenu(false); signOut(); }}>⎋ تسجيل الخروج</button>
+                  </div>
+                )}
               </div>
             )}
           </div>
-        )}
-        {/* subject + subscription state: same row on a computer, its own scrollable row on a phone */}
-        <div className="hdr-row2">
-          {s && onChangeSubject && (
-            <>
+        </div>
+        {keyOpen && <GeminiKeyModal onClose={() => setKeyOpen(false)} />}
+        {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} />}
+      </header>
+      {/* bar 2 (scrolls away): where I am + how to go back, and the subscription */}
+      <nav className="hdr-sub" aria-label="التنقل">
+        <div className="hdr-sub-in">
+          {s && onChangeSubject ? (
+            <div className="hdr-nav">
               <button type="button" className="back-btn" onClick={onChangeSubject} aria-label="الرجوع إلى كل المواد">→ كل المواد</button>
-              <span className="subject-now" aria-label={`المادة الحالية ${s.name}`}><span aria-hidden="true">{s.icon}</span>{s.name}</span>
-            </>
-          )}
+              <span className="subject-now" aria-label={`المادة الحالية ${s.name}`}><span aria-hidden="true">{s.icon}</span><span className="sn-txt">{s.name}</span></span>
+            </div>
+          ) : <span />}
           <button type="button" className={`sub-status ${sub.cls}`} onClick={() => openPlans(null, "details")} title={detail} aria-label={`حالة الاشتراك: ${sub.text} — اضغط لعرض التفاصيل`}>
             <span className="sub-dot" aria-hidden="true" /><span className="sub-txt">{sub.text}</span>
           </button>
         </div>
-      </div>
-      {keyOpen && <GeminiKeyModal onClose={() => setKeyOpen(false)} />}
-      {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} />}
-    </header>
+      </nav>
+    </>
   );
 }
