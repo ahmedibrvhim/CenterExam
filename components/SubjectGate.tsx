@@ -25,7 +25,6 @@ export default function SubjectGate({ onPick }: { onPick: (id: SubjectId) => voi
         {SUBJECTS.map((s, i) => {
           const ok = can(s.id);
           const paid = isAdmin ? undefined : paidCover(entitlements, s.id, now);   // running paid subscription: shown as active, nothing to renew
-          const shown = s.kinds.slice(0, 4), more = s.kinds.length - shown.length;
           return (
           <button key={s.id} type="button" className={`gate-card ready${ok ? "" : " locked"}`} style={{ animationDelay: `${i * 70}ms` }} onClick={() => (ok ? onPick(s.id) : openPlans(s.id))}>
             <span className="gate-top">
@@ -33,12 +32,7 @@ export default function SubjectGate({ onPick }: { onPick: (id: SubjectId) => voi
               <span className="gate-name">{s.name}</span>
             </span>
             <span className="gate-scope" dir="auto">{s.scope}</span>
-            <span className="gate-kinds" aria-label={`${s.kinds.length} نوع سؤال`}>
-              {shown.map((k) => <span key={k.id} className="gate-k">{k.label}</span>)}
-              {more > 0 && <span className="gate-k more">+{more}</span>}
-            </span>
             <span className="gate-foot">
-              <span className="gate-count">{s.kinds.length} نوع سؤال</span>
               {!ok ? <span className="gate-badge">{trialEnded ? "🔒 انتهت التجربة — اضغط للاشتراك" : lapsed(s.id) ? "🔒 انتهى اشتراكك — اضغط للتجديد" : "🔒 اضغط للاشتراك"}</span> : paid ? <span className="gate-badge ok">✓ مشترك · {isForever(paid) ? "دائم ∞" : `متبقٍّ ${leftText(paid, now)}`}</span> : <span className="gate-badge ok">✓ متاحة</span>}
             </span>
           </button>
