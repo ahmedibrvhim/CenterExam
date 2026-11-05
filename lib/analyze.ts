@@ -165,6 +165,18 @@ export function extractSignals(text: string): Signals {
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
+// Reading age of an English text from how long its sentences and words are (used when the book does not say its grade).
+// Egyptian school English is simple: the age is only a rough guide for the length / difficulty of a story.
+export function englishReadingAge(text: string): number | null {
+  const sents = (text.match(/[A-Za-z][^.!?\n]{8,200}[.!?]/g) ?? []).filter((x) => /^[\x00-\x7F\s]+$/.test(x));
+  if (sents.length < 8) return null;
+  const words = sents.flatMap((x) => x.match(/[A-Za-z']+/g) ?? []);
+  if (words.length < 60) return null;
+  const perSentence = words.length / sents.length, wordLen = words.reduce((n, w) => n + w.length, 0) / words.length;
+  const score = perSentence + 3 * (wordLen - 4);
+  return score < 6 ? 7 : score < 8 ? 9 : score < 10 ? 11 : score < 13 ? 13 : 15;
+}
+
 type Item = { k: Kind; n: number; ok: boolean; why: string; w: number; cap: number };
 // size of one copy: grows with the pages, but never more than the text can support. Each type gets a share by its weight, never more than its material.
 function plan(items: Item[], total: number): Avail {
@@ -232,6 +244,8 @@ export function evidenceFor(sig: Signals, pages: number, subject?: string): Avai
       { k: "reason", n: R, ok: R >= 2, why: noReason, w: 2.5, cap: R },
       { k: "compare", n: C, ok: C >= 2, why: noCompare, w: 1.5, cap: C },
       { k: "list", n: LS + R, ok: LS >= 2 || R >= 3, why: "لم تُرصد قوائم أو أسباب ونتائج يمكن عدّها في الصفحات المحددة", w: 2, cap: LS + R },
+      // the maps are found in the PICTURES of the pages (lib/maps.ts), not in the text: the page overrides this entry once it has searched them
+      { k: "map", n: 0, ok: false, why: "لم يُعثر على خرائط في الصفحات المحددة", w: 2, cap: 1 },
     ], total(S));
   }
 
@@ -245,6 +259,7 @@ export function evidenceFor(sig: Signals, pages: number, subject?: string): Avai
       { k: "order", n: SH, ok: okE && SH >= 3, why: noShort, w: 1.5, cap: SH },
       { k: "vocab", n: V + Math.floor(EN / 4), ok: okE && (V >= 3 || EN >= 10), why: "لم تُرصد مفردات كافية في الصفحات المحددة", w: V >= 3 ? 2.5 : 1.5, cap: V + Math.floor(EN / 4) },
       { k: "essay", n: EN, ok: okE, why: tooShortEn, w: 2, cap: Math.ceil(EN * 0.3) },
+      { k: "story", n: EN, ok: okE, why: tooShortEn, w: 1.2, cap: 2 },
       { k: "correct", n: EN, ok: okE, why: tooShortEn, w: EG >= 3 ? 2.5 : 1.5, cap: Math.ceil(EN * 0.4) },
       { k: "rewrite", n: EN, ok: okE, why: tooShortEn, w: EG >= 3 ? 2.5 : 1.5, cap: Math.ceil(EN * 0.4) },
     ], total(EN));
@@ -307,6 +322,7 @@ export function hintsFor(text: string, kinds: string[], subject?: string): strin
   if (has("order", "mcq", "fill") && subject === "social") list("EVENTS WITH DATES in the text (order questions: choose 3-5 of them and ask for the chronological order; copy dates exactly):", sig.dates, 8);
   if (has("order") && subject !== "social") list("SHORT SENTENCES of the text that can be scrambled for order questions (scramble the words; the answer is the original sentence):", sig.short, 8);
   if (has("list")) list("ENUMERATIONS in the text (causes, results, features, examples; best material for list questions):", sig.lists, 6);
+  if (has("story")) list("VOCABULARY and GRAMMAR points of the text (the story must use these words and these structures):", [...sig.glossary, ...sig.enGram], 12);
   if (has("correct", "rewrite")) list("GRAMMAR POINTS shown by the English sentences of the text (build correct / rewrite questions on exactly these points):", sig.enGram, 8);
   return parts.length ? `KEY SENTENCES found in the text (build the matching question types from these first; they are real statements of the book):\n${parts.join("\n")}\n` : "";
 }

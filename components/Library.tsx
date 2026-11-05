@@ -66,11 +66,13 @@ function Preview({ exam, onClose, onChange, onPrint }: { exam: Exam; onClose: ()
                 <b className="mono">{i + 1}</b><span className="pill">{kindLabel(exam.subject, q.kind)}</span>
                 <button type="button" className="pv-del" onClick={() => removeAt(i)}>حذف السؤال</button>
               </div>
-              <p dir="auto">{q.text}</p>
+              {q.mapId && exam.maps?.[q.mapId] && <img src={exam.maps[q.mapId]} alt="" style={{ maxWidth: "100%", maxHeight: 180, borderRadius: 6, border: "1px solid #bbb", marginBottom: 6 }} />}
+              <p dir="auto" style={q.kind === "story" ? { whiteSpace: "pre-wrap" } : undefined}>{q.text}</p>
+              {q.kind === "story" && <ol dir="ltr">{q.choices.map((c, k) => <li key={k}>{c.replace(" ||| ", "  →  ")}</li>)}</ol>}
               {q.kind === "mcq" && <ul dir="auto">{q.choices.map((c, k) => <li key={k} className={c === q.answer ? "ok" : ""}>{c}</li>)}</ul>}
               {q.kind === "match" && <ul dir="auto">{q.choices.map((c, k) => <li key={k}>{c.replace(" ||| ", "  ⟷  ")}</li>)}</ul>}
               {q.kind === "tf" && q.answer && <span className="lq-ans">✓ {q.answer === "true" ? (isAr(q.text) ? "صح" : "True") : isAr(q.text) ? "خطأ" : "False"}</span>}
-              {q.kind !== "mcq" && q.kind !== "tf" && q.kind !== "match" && q.answer && <p className="pv-ans" dir="auto" style={{ whiteSpace: "pre-wrap" }}>✓ {q.answer}</p>}
+              {q.kind !== "mcq" && q.kind !== "tf" && q.kind !== "match" && q.kind !== "story" && q.answer && <p className="pv-ans" dir="auto" style={{ whiteSpace: "pre-wrap" }}>✓ {q.answer}</p>}
               {q.explanation && <p className="pv-why" dir="auto">{q.explanation}</p>}
             </li>
           ))}

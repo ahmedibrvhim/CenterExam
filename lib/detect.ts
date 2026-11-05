@@ -6,7 +6,8 @@
 //   2. "text"    - the same phrase, or only the stage ("المرحلة الإعدادية"), anywhere in the chosen pages
 //   3. "lessons" - the LESSON / UNIT NAMES (headings and table-of-contents lines) matched against typical topics of each stage
 import type { Avail, Branch, Stage } from "@/lib/subjects";
-import { evidenceFor, extractSignals, focusFor, norm } from "@/lib/analyze";
+import { englishReadingAge, evidenceFor, extractSignals, focusFor, norm } from "@/lib/analyze";
+import { ageOf } from "@/lib/subjects";
 
 export type DetectSource = "cover" | "text" | "lessons" | null;
 export type Detected = {
@@ -15,6 +16,7 @@ export type Detected = {
   source: DetectSource;        // how the stage was found (null = not found)
   lessons: string[];           // lesson / unit names found in the pages
   focus: string[];             // what the pages mostly teach (نحو / بلاغة / تواريخ وأحداث / Grammar ...), per subject
+  age: number | null;          // reading age of the pupils (from the grade; for English also estimated from the text): used to write stories at the right level
 };
 
 // norm() + the letters it leaves alone (ئ in "ابتدائي", ؤ) + Arabic-Indic digits
@@ -41,6 +43,11 @@ function gradeHits(text: string): Hit[] {
   const out: Hit[] = [];
   for (const m of text.matchAll(GRADE_WORD)) { const lv = levelOfWord(m[1]); if (lv) out.push({ stage: stageOfWord(m[2]), level: lv }); }
   for (const m of text.matchAll(GRADE_NUM)) out.push({ stage: stageOfWord(m[2]), level: Number(m[1]) });
+  // English covers: "Primary 4", "Prep 2", "Secondary 1", "4th Primary", "Grade 5" (Egypt: grades 1-6 primary, 7-9 prep, 10-12 secondary)
+  const st = (w: string): Stage => (/^primary/i.test(w) ? "primary" : /^prep/i.test(w) ? "prep" : "secondary");
+  for (const m of text.matchAll(/\b(primary|prep(?:aratory)?|secondary)\s*(?:school\s*)?(?:year\s*|grade\s*|stage\s*)?([1-6])\b/gi)) out.push({ stage: st(m[1]), level: Number(m[2]) });
+  for (const m of text.matchAll(/\b([1-6])(?:st|nd|rd|th)?\s*(primary|prep(?:aratory)?|secondary)\b/gi)) out.push({ stage: st(m[2]), level: Number(m[1]) });
+  for (const m of text.matchAll(/\bgrade\s*(1[0-2]|[1-9])\b/gi)) { const g = Number(m[1]); out.push(g <= 6 ? { stage: "primary", level: g } : g <= 9 ? { stage: "prep", level: g - 6 } : { stage: "secondary", level: g - 9 }); }
   return out;
 }
 function stageHits(text: string): Stage[] {
@@ -136,5 +143,6 @@ export function detectFromRanges(sources: Source[], subject?: string): Detected 
 
   const sig = extractSignals(slice.join("\n"));
   const avail = evidenceFor(sig, slice.length, subject);
-  return { stage, level, grade, branch, avail, pages: slice.length, facts: sig.facts, source, lessons, focus: focusFor(sig, subject) };
+  const age = ageOf(stage, level) ?? (subject === "english" ? englishReadingAge(slice.join("\n")) : null);
+  return { stage, level, grade, branch, avail, pages: slice.length, facts: sig.facts, source, lessons, focus: focusFor(sig, subject), age };
 }

@@ -4,7 +4,7 @@ import { classify } from "@/lib/geminiErrors";
 import { addUsage, clearDayLimit, markDayLimit } from "@/lib/store";
 import { createHash } from "crypto";
 import { msUntilPacificMidnight } from "@/lib/limits";
-import { ALL_KINDS, BRANCH_LABEL, GRADE_ORD, STAGE_SHORT, type Branch, type Stage } from "@/lib/subjects";
+import { ALL_KINDS, BRANCH_LABEL, GRADE_ORD, STAGE_SHORT, ageOf, type Branch, type Stage } from "@/lib/subjects";
 import { balanceCheck } from "@/lib/chem";
 import { hintsFor, norm } from "@/lib/analyze";
 import { ApiError, assertSubjectAccess, requireUser } from "@/lib/server/admin";
@@ -86,6 +86,7 @@ COMPLETE, SELF-CONTAINED QUESTIONS
 - NO REFERENCES TO THE BOOK: the student will NOT have the book, a picture, a figure, a table or a graph. Never write "في النص", "المذكورة", "الواردة", "الموضح", "الشكل", "الجدول", "الصورة", "الرسم", "أعلاه", "أدناه", "according to the text", and never mention page numbers. If the idea needs a list (elements, substances, steps), write the names inside the question.
   Bad: "ما نظائر العناصر المذكورة في النص؟"   Good: "ما نظائر عنصر الهيدروجين؟"
 - If the text contains the book's own exercise questions you may use them, written in full with the missing subject added.
+- ONLY EXCEPTION: questions of type map. The exam prints the map picture right above them, so they may say "في الخريطة" / "على الخريطة". They must still never mention a page number.
 
 QUALITY
 - One idea per question. Never ask two things in one question, never ask the same idea twice, and spread the questions over different parts of the text (not all from the first paragraph).
@@ -161,6 +162,20 @@ const LANG_COMMON: Record<string, string[]> = {
 };
 // the types that are written the same way in every subject (the subject only changes the wording of the question)
 const MATCH_RULE = (head: string, what: string) => `- match (${head}): the text is exactly "${head}" and NOTHING else. choices = 4 or 5 pairs, each written "item of column A ||| its match in column B" (${what}). Every pair comes from the text. All items of column A are different, all items of column B are different, and no item of column B could also fit another item of column A. answer = the same pairs, one per line, written "A ← B".`;
+// How long and how hard a story is, by the age of the pupils (the age comes from the grade found in the book, see lib/detect.ts)
+function storyRule(age: number | null, stage: Stage | null, level: number | null): string {
+  const lv = age == null ? "The reader age is UNKNOWN: infer it from the difficulty of the book text (sentence length, vocabulary, grammar) and write the story at that level."
+    : age <= 7 ? `READER AGE = ${age} (${stage === "primary" ? `primary ${level ?? ""}` : "young beginner"}). 40-60 words, sentences of at most 8 words, only very common words, simple present or past simple, 3 questions.`
+    : age <= 9 ? `READER AGE = ${age}. 60-90 words, short simple sentences (6-10 words), everyday words, 3-4 questions.`
+    : age <= 11 ? `READER AGE = ${age}. 90-130 words, simple and compound sentences, everyday words, 4 questions.`
+    : age <= 13 ? `READER AGE = ${age}. 120-170 words, some linking words (because, but, so, then, after that), 4 questions.`
+    : age <= 15 ? `READER AGE = ${age}. 160-230 words, a clear beginning / problem / ending, richer vocabulary, 4-5 questions.`
+    : `READER AGE = ${age}. 200-300 words, varied sentences and tenses, richer vocabulary, 5 questions.`;
+  return `- story (Read the story): ONE short ORIGINAL story written by you. It does not have to come from the text, but its vocabulary and grammar must stay inside what the text teaches plus very common words. ${lv}
+  Format: "text" = the TITLE on the first line (2-5 words, no full stop), then the story in 1-3 short paragraphs, each on its own line. The story must be complete (a real ending) and suit that age: animals, school, friends, family, nature, helping others, a small mystery. NO violence, romance, politics, religion, brands or real people.
+  "choices" = the questions, each written "question ||| short answer" (the answer is at most one sentence). Mix who / what / where / when, why, one true-or-false question (the answer is True or False, the question starts with "True or false:") and, for ages 9+, one question about the meaning of a word from the story. Every answer is found IN the story, the questions follow the order of the story and none repeats another. "answer" = all the answers, one per line, in the same order. Everything is in English.`;
+}
+const MAP_RULE = `- map (أسئلة الخرائط): the picture sent with this request is a MAP cut from the book. It is printed on the exam right above these questions, so the student SEES it. Write short questions answered by LOOKING at the map: the name written at a number or letter, what is drawn at a sign of the legend, which sea / river / country / city lies north, south, east or west of another, the capital marked on it, what a colour means. Use ONLY names and signs that are clearly readable on the picture or written in the MAP NOTES. If you cannot read a label with certainty, do NOT ask about it. The book's own map questions in the MAP NOTES may be used, written in full. Each question says exactly what is asked and where to look (for example "ما اسم البحر الذي يحد الدولة المشار إليها بالرقم ٣ من الجهة الشمالية؟"), never "ما هذا؟". Never ask the student to draw, colour or mark on the map. choices = []. answer = the short exact answer. No two questions have the same answer.`;
 const LANG_KIND_RULES: Record<string, Record<string, string>> = {
   arabic: {
     mcq: "- mcq: for grammar and morphology the three wrong choices are the classic mistakes (another case ending, another part of speech, another form) and look like the right one. For vocabulary the choices are real Arabic words of the same type. Exactly one choice is correct under the rules the text teaches.",
@@ -185,6 +200,7 @@ const LANG_KIND_RULES: Record<string, Record<string, string>> = {
     define: "- define (عرّف): the text is short: \"عرّف: <term>.\" where the term is a concept the text defines (a term, a treaty, a revolution, a feature...). answer = the book's definition in 1-2 sentences. Never ask to define something the text does not define.",
     reason: "- reason (علّل): the text MUST begin with \"علل:\" followed by the COMPLETE true statement to be explained, written inside the question (e.g. \"علل: ازدهرت الزراعة على ضفاف نهر النيل.\"). The text must give its cause. answer = the cause in 1-2 sentences.",
     compare: "- compare (قارن): the text is \"قارن بين <A> و <B> من حيث <aspect 1> و <aspect 2>.\" Both items and every aspect must be covered by the text. answer = one line per aspect, written \"<aspect>: <A> ... / <B> ...\". Only compare things the text really contrasts.",
+    map: MAP_RULE,
     list: "- list (اذكر / عدّد): the text starts with \"اذكر\" or \"عدّد\" and says HOW MANY, e.g. \"اذكر ثلاثة من أسباب قيام ثورة ١٩١٩.\" / \"عدّد مظاهر التنوع في ...\". The number asked is never more than the text lists. answer = the points one per line (all the points the text gives, up to 5).",
   },
   english: {
@@ -199,7 +215,7 @@ const LANG_KIND_RULES: Record<string, Record<string, string>> = {
     rewrite: "- rewrite (rewrite as shown): the text is \"Rewrite the sentence as shown:\" followed by ONE complete sentence and, between brackets, what to do (make it negative / make it a question / use the passive / use reported speech / join with because, but, and / begin with ...). answer = the whole rewritten sentence. The task has ONE correct answer; add the first words (\"Begin with: ...\") when more than one wording is possible.",
   },
 };
-function subjectRules(subject: string, stage: Stage | null, level: number | null, branch: Branch | null, types: string[], focus: string[] = []): string {
+function subjectRules(subject: string, stage: Stage | null, level: number | null, branch: Branch | null, types: string[], focus: string[] = [], age: number | null = null): string {
   if (subject === "math") {
     const m = ["SUBJECT = Mathematics (رياضيات). Questions must test mathematical skill, not memorising page layout."];
     if (stage) m.push(MATH_STAGE[stage]);
@@ -214,7 +230,7 @@ function subjectRules(subject: string, stage: Stage | null, level: number | null
     else m.push("The school stage is unknown: infer it from the vocabulary and difficulty of the text and write questions at that level.");
     if (focus.length) m.push(`THE CHOSEN PAGES MOSTLY TEACH: ${focus.join(" / ")}. Write the questions from these areas, in proportion to how much of the text each one covers.`);
     m.push(...LANG_COMMON[subject]);
-    for (const k of types) if (LANG_KIND_RULES[subject][k]) m.push(LANG_KIND_RULES[subject][k]);
+    for (const k of types) { const rule = k === "story" ? storyRule(age, stage, level) : LANG_KIND_RULES[subject][k]; if (rule) m.push(rule); }
     return "\n\nSUBJECT RULES:\n" + m.join("\n");
   }
   if (subject !== "science") return "";
@@ -299,7 +315,7 @@ export async function POST(req: Request) {
   if (!apiKey) return NextResponse.json({ code: "no_key", error: "لم تضف مفتاح Gemini الخاص بك بعد. اضغط زر «🔑 مفتاح الذكاء الاصطناعي» في الأعلى والصق مفتاحك المجاني." }, { status: 400 });
   const key: string = apiKey; // narrowed copy for the closures below
 
-  let body: { context?: string; want?: Record<string, number>; avoid?: string[]; difficulty?: string; topic?: string; subject?: string; stage?: string; level?: number; branch?: string; focus?: string[] };
+  let body: { context?: string; want?: Record<string, number>; avoid?: string[]; difficulty?: string; topic?: string; subject?: string; stage?: string; level?: number; branch?: string; focus?: string[]; age?: number; maps?: Array<{ id?: string; dataUrl?: string; hint?: string }> };
   try { body = await req.json(); } catch { return NextResponse.json({ code: "bad_request", error: "طلب غير صالح" }, { status: 400 }); }
 
   const isMath = body.subject === "math";
@@ -311,6 +327,13 @@ export async function POST(req: Request) {
     const c = Math.max(0, Math.floor(Number(body.want?.[k]) || 0));
     if (c && n < 8) { want[k] = Math.min(c, 8 - n); n += want[k]; }
   }
+  // map questions need the picture: ONE map per request (the client sends it with its notes). Without a valid picture the type is dropped.
+  const mapIn = (Array.isArray(body.maps) ? body.maps : []).find((m) => typeof m?.id === "string" && m.id.length <= 60 && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(String(m?.dataUrl ?? "")) && String(m.dataUrl).length <= 1_600_000);
+  const mapPic = mapIn ? { id: String(mapIn.id), b64: String(mapIn.dataUrl).replace(/^data:image\/jpeg;base64,/, ""), hint: String(mapIn.hint ?? "").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, " ").slice(0, 900) } : null;
+  if (want.map && (!mapPic || body.subject !== "social")) { n -= want.map; delete want.map; }
+  if (want.story && body.subject !== "english") { n -= want.story; delete want.story; }
+  if (want.story > 2) { n -= want.story - 2; want.story = 2; }            // a story is long: two per request keep the answer inside the time limit
+  if (want.map > 5) { n -= want.map - 5; want.map = 5; }
   const types = Object.keys(want);
   if (context.trim().length < 200 || !types.length) return NextResponse.json({ code: "bad_request", error: "النص قصير جدًا أو لم تُحدَّد أنواع الأسئلة" }, { status: 400 });
   const level = LEVELS[body.difficulty ?? "mixed"] ?? LEVELS.mixed;
@@ -321,19 +344,23 @@ export async function POST(req: Request) {
     essay: body.subject === "english" ? "essay (answer the question in a full sentence)" : body.subject === "arabic" ? "essay (comprehension: a short written answer)" : "essay (theoretical question)",
     reason: "reason (علل)", problem: "problem (numeric science problem)", solve: "solve (math question the student answers with a worked solution)", balance: "balance (balance a given chemical equation)", write: "write (write a balanced chemical equation from words)",
     match: "match (two columns: choices are 'A ||| B' pairs)", order: body.subject === "social" ? "order (put events in order)" : "order (scramble the words of a sentence)", vocab: "vocab (one word: synonym / opposite / plural / meaning)", list: "list (اذكر / عدّد)",
+    story: "story (a short original English story + questions about it)", map: "map (questions answered by looking at the map picture)",
     irab: "irab (parse the words between brackets)", extract: "extract (extract what is asked from a sentence)", rhetoric: "rhetoric (figure of speech / style)", correct: "correct (correct the mistake)", rewrite: "rewrite (rewrite the sentence as shown)",
   };
   const stage = (["primary", "prep", "secondary"] as const).find((x) => x === body.stage) ?? null;
   const gradeNo = Number.isInteger(body.level) && body.level! >= 1 && body.level! <= 6 ? body.level! : null;
   const branch = (Object.keys(BRANCH_LABEL) as Branch[]).find((x) => x === body.branch) ?? null;
   const focus = (Array.isArray(body.focus) ? body.focus : []).map((x) => String(x).replace(/\s+/g, " ").trim().slice(0, 40)).filter(Boolean).slice(0, 6);
-  const rules = subjectRules(String(body.subject ?? ""), stage, gradeNo, branch, types, focus);
+  const ageIn = Number.isInteger(body.age) && body.age! >= 5 && body.age! <= 19 ? body.age! : null;
+  const age = ageOf(stage, gradeNo) ?? ageIn;          // the grade found in the book decides; the reading-level estimate is the fallback
+  const rules = subjectRules(String(body.subject ?? ""), stage, gradeNo, branch, types, focus, age);
 
   const hints = hintsFor(context, types, String(body.subject ?? "") || undefined);
   const prompt = `${rules ? rules.trim() + "\n\n" : ""}${hints ? hints + "\n" : ""}Write exactly ${n} questions, with exactly this many of each type:
 ${types.map((k) => `- ${NAMES[k]}: ${want[k]}`).join("\n")}
 Difficulty: ${level}.
 ${topic ? `Focus on this topic: ${topic}\n` : ""}${avoid.length ? `These questions were ALREADY written for other copies of the exam. Do NOT repeat them or ask the same thing in other words; write completely different questions about other facts in the text:\n${avoid.map((s) => `- ${s}`).join("\n")}\n` : ""}
+${mapPic ? `MAP NOTES (text printed on the book page around the map; the book's own map questions are here):\n"""\n${mapPic.hint || "(none)"}\n"""\n` : ""}
 TEXT:
 """
 ${context}
@@ -354,7 +381,7 @@ ${context}
       headers: { "content-type": "application/json", "x-goog-api-key": key },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: SYSTEM }] },
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        contents: [{ role: "user", parts: [{ text: prompt }, ...(mapPic && want.map ? [{ inlineData: { mimeType: "image/jpeg", data: mapPic.b64 } }] : [])] }],
         generationConfig: {
           responseMimeType: "application/json", responseSchema: SCHEMA, maxOutputTokens: 6144,
           ...(thinking ? { thinkingConfig: thinking } : {}),
@@ -422,7 +449,7 @@ ${context}
                   let raw: Raw;
                   try { raw = JSON.parse(obj); } catch { continue; }
                   const q = cleanOne(raw, types, isMath, String(body.subject ?? ""));
-                  if (q) { count++; send({ t: "q", q }); }
+                  if (q) { if (q.kind === "map" && mapPic) q.mapId = mapPic.id; count++; send({ t: "q", q }); }
                 }
               }
             }

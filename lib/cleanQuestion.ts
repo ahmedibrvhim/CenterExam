@@ -6,6 +6,8 @@ import { norm } from "@/lib/analyze";
 
 export type Raw = { type?: string; text?: string; choices?: unknown; answer?: string; explanation?: string };
 
+const LETTERS_N = (t: string) => (t.match(/\p{L}/gu) ?? []).length;
+
 // A question that is too short, or ends in the middle of a sentence ("... في" / "... من"), is dropped.
 const DANGLING = /(?:^|\s)(?:في|من|إلى|الى|على|عن|مع|و|أو|او|ثم|التي|الذي|الذين|هل|ما|ماذا|كيف|لماذا|and|or|of|the|to|in|is|are|that|which)\s*$/i;
 // Questions that point at a text / picture / table the student does not have cannot be solved -> dropped.
@@ -36,7 +38,8 @@ export function cleanOne(r: Raw, allowed: string[], math = false, subject = ""):
   let text = (r.text ?? "").trim();
   if (kind === "match") text = subject === "english" ? "Match column ( A ) with column ( B ):" : "صل من العمود ( أ ) ما يناسبه من العمود ( ب ):";
   if (!text || !allowed.includes(kind)) return null;
-  if (looksIncomplete(text, kind === "define" || kind === "vocab" || math, math, kind === "order" || kind === "match")) return null; // cut-off or too short to stand alone: better no question than a broken one
+  // a story is a whole text and a map question points at the picture printed above it on purpose: they have their own checks below
+  if (kind !== "story" && kind !== "map" && looksIncomplete(text, kind === "define" || kind === "vocab" || math, math, kind === "order" || kind === "match")) return null; // cut-off or too short to stand alone: better no question than a broken one
   const explanation = (r.explanation ?? "").trim();
   const answer = (r.answer ?? "").trim();
   if (kind === "mcq") {
@@ -98,6 +101,29 @@ export function cleanOne(r: Raw, allowed: string[], math = false, subject = ""):
     return { kind, text, choices: [], answer, explanation };
   }
   const squash = (x: string) => norm(x).replace(/[\s.،,؟?!:؛;"'«»()\[\]\-–—←→/]+/g, "");
+  if (kind === "map") {
+    // answered by LOOKING at the map printed above the question: it needs a real question and a short exact answer, and must not point at a book page
+    if (LETTERS_N(text) < 10 || answer.length < 2 || answer.length > 200) return null;
+    if (/(?:صفحة|ص)\s*\d+/.test(text)) return null;
+    if (/[?؟]\s*$/.test(text) === false && !/^(?:حدد|اذكر|اكتب|عدد|عدّد|استخرج|ما|ماذا|أي|اي|من|أين|اين|كم|بيّن|بين|وضح)/.test(text)) return null; // a question or a clear instruction
+    return { kind, text, choices: [], answer, explanation };
+  }
+  if (kind === "story") {
+    // an English story + 3-6 questions about it. The story and every answer must be English, the questions must differ, the answers must be short.
+    const words = text.split(/\s+/).filter(Boolean).length;
+    const pairs: Array<[string, string]> = [];
+    for (const c of Array.isArray(r.choices) ? r.choices : []) {
+      const [a, ...rest] = String(c).split("|||");
+      const q = (a ?? "").trim(), ans = rest.join("|||").trim();
+      if (q && ans) pairs.push([q, ans]);
+    }
+    if (words < 35 || words > 420 || pairs.length < 3 || pairs.length > 6) return null;
+    if (/[\u0600-\u06FF]/.test(text) || pairs.some(([q, a]) => /[\u0600-\u06FF]/.test(q + a))) return null;
+    if (pairs.some(([q, a]) => q.length < 8 || a.length > 180)) return null;
+    if (new Set(pairs.map((p) => squash(p[0]))).size !== pairs.length) return null;
+    if (/[^.!?"'”’)]\s*$/.test(text)) return null;                // the story stops in the middle of a sentence
+    return { kind, text, choices: pairs.map((p) => `${p[0]} ||| ${p[1]}`), answer: pairs.map((p) => p[1]).join("\n"), explanation };
+  }
   if (kind === "match") {
     const pairs: Array<[string, string]> = [];
     for (const c of Array.isArray(r.choices) ? r.choices : []) {

@@ -11,12 +11,14 @@ export type Kind =
   | "term" | "define" | "vocab"
   // understanding
   | "reason" | "compare" | "list" | "essay"
+  // reading / pictures: a short story with questions (English) and a map taken from the book with its questions (social studies)
+  | "story" | "map"
   // skills (calculation / chemistry / language)
   | "problem" | "solve" | "balance" | "write" | "irab" | "extract" | "rhetoric" | "correct" | "rewrite";
 // also the order of the sections on the exam sheet when a subject does not say otherwise. "essay" and "problem" are no longer offered for science, but exams saved earlier still use them.
 export const ALL_KINDS: Kind[] = [
   "mcq", "tf", "reason", "balance", "write", "term", "define", "compare", "fill", "essay", "problem", "solve",
-  "vocab", "irab", "extract", "rhetoric", "correct", "rewrite", "match", "order", "list",
+  "vocab", "irab", "extract", "rhetoric", "correct", "rewrite", "match", "order", "list", "story", "map",
 ];
 export const zeroCounts = (): Record<Kind, number> => Object.fromEntries(ALL_KINDS.map((k) => [k, 0])) as Record<Kind, number>;
 export const zeroTexts = (): Record<Kind, string> => Object.fromEntries(ALL_KINDS.map((k) => [k, "0"])) as Record<Kind, string>;
@@ -107,6 +109,8 @@ export const SUBJECTS: Subject[] = [
       { ...TERM, section: "اكتب المصطلح الدال على كل عبارة مما يأتي" }, { ...DEFINE },
       { ...REASON }, { ...COMPARE },
       { id: "list", label: "اذكر / عدّد", hint: "أسباب · نتائج · أمثلة", section: "اذكر ما يأتي", group: "understanding", grades: ALL },
+      // the map is cut out of the book page (lib/maps.ts) and printed on the exam above its questions
+      { id: "map", label: "أسئلة الخرائط", hint: "خريطة من الكتاب تُطبع في الاختبار مع أسئلتها", section: "أجب عن الأسئلة الآتية مستعينًا بالخريطة", group: "skills", grades: ALL },
     ],
   },
   {
@@ -119,6 +123,8 @@ export const SUBJECTS: Subject[] = [
       { id: "order", label: "رتّب", hint: "كلمات مبعثرة لتكوين جملة", section: "Put the words in the correct order to make a sentence", group: "objective", grades: ALL },
       { id: "vocab", label: "مفردات", hint: "synonym · opposite · plural", section: "Write the synonym, the opposite or the plural as asked", group: "knowledge", grades: ALL },
       { id: "essay", label: "فهم واستيعاب", hint: "أجب بجملة كاملة", section: "Answer the following questions", group: "understanding", grades: ALL },
+      // a short story written by the AI at the reading age of the grade found in the book (lib/detect.ts), followed by questions about it
+      { id: "story", label: "قصة (Story)", hint: "قصة قصيرة بمستوى سنّ الطالب + أسئلتها", section: "Read the story, then answer the questions", group: "understanding", grades: ALL },
       { id: "correct", label: "صحّح", hint: "صحّح الخطأ في الجملة", section: "Correct the mistake in each of the following sentences", group: "skills", grades: ALL },
       { id: "rewrite", label: "أعد الكتابة", hint: "مبني للمجهول · سؤال · نفي …", section: "Rewrite the following sentences as shown", group: "skills", grades: ALL },
     ],
@@ -137,7 +143,7 @@ export const SECTION_TITLE: Record<Kind, string> = FIRST_DEF((k) => k.section);
 export const KIND_LABEL: Record<Kind, string> = {
   mcq: "اختر", tf: "صح وخطأ", essay: "نظري", reason: "علّل", problem: "مسألة", balance: "وزن معادلة", write: "كتابة معادلة",
   term: "اكتب المصطلح", define: "عرّف", compare: "قارن", fill: "أكمل", solve: "أجب",
-  vocab: "مفردات", irab: "أعرب", extract: "استخرج", rhetoric: "بلاغة", correct: "صحّح", rewrite: "أعد الكتابة", match: "صل", order: "رتّب", list: "اذكر / عدّد",
+  vocab: "مفردات", irab: "أعرب", extract: "استخرج", rhetoric: "بلاغة", correct: "صحّح", rewrite: "أعد الكتابة", match: "صل", order: "رتّب", list: "اذكر / عدّد", story: "قصة", map: "خريطة",
 };
 export const sectionTitle = (subject: string | null | undefined, k: Kind): string => getSubject(subject)?.kinds.find((d) => d.id === k)?.section ?? SECTION_TITLE[k];
 export const kindLabel = (subject: string | null | undefined, k: Kind): string => getSubject(subject)?.kinds.find((d) => d.id === k)?.label ?? KIND_LABEL[k];
@@ -151,6 +157,9 @@ export const STAGE_LABEL: Record<Stage, string> = { primary: "المرحلة ا�
 export const STAGE_SHORT: Record<Stage, string> = { primary: "الابتدائي", prep: "الإعدادي", secondary: "الثانوي" };
 export const BRANCH_LABEL: Record<Branch, string> = { general: "علوم عامة", physics: "فيزياء", chemistry: "كيمياء", biology: "أحياء", geology: "جيولوجيا" };
 export const GRADE_ORD = ["الأول", "الثاني", "الثالث", "الرابع", "الخامس", "السادس"];
+// Reading age of the pupils (Egypt: primary 1 = 6 years old ... secondary 3 = 18). Used so the AI writes a story of the right level.
+export const ageOf = (st: Stage | null, lv: number | null): number | null =>
+  st === "primary" ? (lv ? 5 + lv : 9) : st === "prep" ? (lv ? 11 + lv : 13) : st === "secondary" ? (lv ? 14 + lv : 16) : null;
 export const gradesOf = (st: Stage) => (st === "primary" ? [1, 2, 3, 4, 5, 6] : [1, 2, 3]);
 export const gradeName = (st: Stage | null, lv: number | null) => (st && lv ? `الصف ${GRADE_ORD[lv - 1]} ${STAGE_SHORT[st]}` : null);
 

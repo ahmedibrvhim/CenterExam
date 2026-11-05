@@ -2,7 +2,12 @@ import { CENTER_NAME, LOGO_DATA_URI } from "@/lib/logo";
 import { WM_ASPECT, WM_DATA_URI } from "@/lib/watermark";
 import { ALL_KINDS, getSubject, kindOrder, sectionTitle, type Kind } from "@/lib/subjects";
 import { cleanMathText, linesFrom, readMathPage, type Engine, type Gray } from "@/lib/mathocr";
-export type Q = { text: string; choices: string[]; kind: Kind; answer?: string; explanation?: string };
+import { fixArabicPage } from "@/lib/arabicFix";
+import { authFetch } from "@/lib/authFetch";
+export type Q = {
+  text: string; choices: string[]; kind: Kind; answer?: string; explanation?: string;
+  mapId?: string; // "map" questions: the id of the map picture (Exam.maps) printed above them
+};
 export type Exam = {
   id: string; title: string; sources: string[]; questions: Q[];
   versions: string[]; seed: number; shuffleQ: boolean; shuffleA: boolean; date: string;
@@ -11,7 +16,11 @@ export type Exam = {
   sets?: Q[][]; // one DIFFERENT set of questions per version (sets[i] belongs to versions[i]). Missing in exams saved by older releases.
   subject?: string; stage?: string; // set by the subject picker (older exams have none)
   grade?: string; // total mark the teacher typed (printed in the "الدرجة" box); no marks are printed per question
+  maps?: Record<string, string>; // map pictures cut out of the book (social studies): id -> JPEG data URL; the "map" questions point at them with mapId
 };
+
+// Who prints the exam: shown in the footer of every page of the PDF (the name and phone the teacher gave when subscribing).
+export type Teacher = { name: string; phone: string };
 
 // ---------- 1) read text from a PDF (in the browser), one string per page ----------
 export async function extractPages(file: File, onProgress?: (done: number, total: number) => void): Promise<string[]> {
@@ -108,9 +117,27 @@ const mathEngine = (w: any): Engine => ({
   },
 });
 
+// ---- AI page reader (Arabic grammar books): see app/api/ocr/route.ts. One page at a time, ~6.5 s apart (the free limit is ~10 requests a minute). ----
+const AI_GAP_MS = 6500;
+const AI_STOP = new Set(["no_key", "bad_key", "rate_day", "no_access", "trial_limit", "bad_request"]); // after one of these the AI reader is not asked again in this run
+function pageJpeg(canvas: HTMLCanvasElement, width = 1600): string {
+  const s = Math.min(1, width / canvas.width);
+  const c = document.createElement("canvas");
+  c.width = Math.round(canvas.width * s); c.height = Math.round(canvas.height * s);
+  c.getContext("2d")!.drawImage(canvas, 0, 0, c.width, c.height);
+  const d = c.toDataURL("image/jpeg", 0.85);
+  c.width = c.height = 0;
+  return d;
+}
+
 export async function ocrPages(
   file: File, nums: number[], signal: AbortSignal,
-  hooks: { onProgress?: (done: number, total: number) => void; onRequest?: () => void; onWait?: (secs: number) => void; onPage?: (n: number, text: string) => void; math?: boolean } = {},
+  hooks: {
+    onProgress?: (done: number, total: number) => void; onRequest?: () => void; onWait?: (secs: number) => void; onPage?: (n: number, text: string) => void; math?: boolean;
+    subject?: string;                                   // "arabic" -> grammar clean-up of the text and (with ai) the AI page reader
+    ai?: boolean;                                       // read each page with the AI first (needs the teacher's Gemini key); Tesseract is the fallback for any page
+    onAi?: (state: "off", why: string) => void;         // the AI reader was switched off for the rest of this run (no key / daily limit ...)
+  } = {},
 ): Promise<Record<number, string>> {
   // @ts-ignore - pdfjs-dist 3.x ships without usable types for this path
   const pdfjs: any = await import("pdfjs-dist/build/pdf");
@@ -118,13 +145,19 @@ export async function ocrPages(
   const { createWorker } = await import("tesseract.js");
   const doc = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
   const out: Record<number, string> = {};
-  let finished = 0, failed = 0, next = 0;
+  let finished = 0, failed = 0, next = 0, setupFailed = false;
   const workers: any[] = [];
+  const arabic = hooks.subject === "arabic" && !hooks.math;
+  // Arabic grammar pages carry small diacritics: a sharper page (about 360 dpi on a computer) keeps them
+  const width = arabic ? Math.round(OCR_WIDTH * 1.25) : OCR_WIDTH;
+  const dpi = arabic ? String(Math.min(400, Math.round(width / 8.27 / 10) * 10)) : "300";
+  let aiOn = !!hooks.ai && !hooks.math && !!hooks.subject;
+  let gate: Promise<void> = Promise.resolve(), lastAi = 0;
 
   const render = async (n: number): Promise<HTMLCanvasElement> => {
     const page = await doc.getPage(n);
     const base = page.getViewport({ scale: 1 });
-    const viewport = page.getViewport({ scale: Math.min(4, OCR_WIDTH / base.width) });
+    const viewport = page.getViewport({ scale: Math.min(4, width / base.width) });
     const canvas = document.createElement("canvas");
     canvas.width = Math.round(viewport.width); canvas.height = Math.round(viewport.height);
     const ctx = canvas.getContext("2d")!;
@@ -135,35 +168,60 @@ export async function ocrPages(
     return canvas;
   };
 
+  // ask the AI reader for one page; null = use Tesseract for this page
+  const aiRead = async (canvas: HTMLCanvasElement): Promise<string | null> => {
+    if (!aiOn) return null;
+    const turn = gate.then(async () => { const w = lastAi + AI_GAP_MS - Date.now(); if (w > 0) await new Promise((r) => setTimeout(r, w)); lastAi = Date.now(); });
+    gate = turn.catch(() => {});
+    await turn;
+    if (!aiOn || signal.aborted) return null;
+    try {
+      const res = await authFetch("/api/ocr", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ image: pageJpeg(canvas), subject: hooks.subject }), signal });
+      const j: any = await res.json().catch(() => ({}));
+      if (res.ok && typeof j.text === "string") {
+        const letters = (j.text.match(/[\p{L}\p{N}]/gu) ?? []).length;
+        return letters >= 15 ? j.text : null;           // an empty / tiny answer is not a page: read it with Tesseract
+      }
+      if (AI_STOP.has(j.code)) { aiOn = false; hooks.onAi?.("off", j.code); }
+      else if (j.code === "rate_minute") lastAi = Date.now() + Math.min(60, Number(j.retryAfter) || 30) * 1000; // wait out the minute limit, this page goes to Tesseract
+      return null;
+    } catch { if (signal.aborted) throw new Error("aborted"); return null; }
+  };
+
   try {
-    const count = Math.max(1, Math.min(PARALLEL, nums.length));
-    for (let i = 0; i < count; i++) {
-      if (signal.aborted) throw new Error("aborted");
-      workers.push(await createWorker("ara+eng", 1, {
-        workerPath: "/tesseract/worker.min.js",
-        corePath: "/tesseract",
-        langPath: "/tessdata",
-        gzip: false,
-      }));
-    }
-    // keep real spaces between words, and tell the engine the page is about 300 dpi (it guesses badly otherwise)
-    await Promise.all(workers.map((w) => w.setParameters({ preserve_interword_spaces: "1", user_defined_dpi: "300" }).catch(() => {})));
-    const run = async (w: any) => {
+    const count = Math.max(1, Math.min(aiOn ? 2 : PARALLEL, nums.length));
+    const run = async () => {
+      let w: any = null;
+      // Tesseract starts only when a page needs it (a book read entirely by the AI reader never loads the 12 MB Arabic data)
+      const tess = async () => {
+        if (w) return w;
+        try {
+          w = await createWorker("ara+eng", 1, { workerPath: "/tesseract/worker.min.js", corePath: "/tesseract", langPath: "/tessdata", gzip: false });
+        } catch (e) { setupFailed = true; throw e; }
+        workers.push(w);
+        // keep real spaces between words, and tell the engine the real page resolution (it guesses badly otherwise)
+        await w.setParameters({ preserve_interword_spaces: "1", user_defined_dpi: dpi }).catch(() => {});
+        return w;
+      };
       while (next < nums.length) {
         if (signal.aborted) throw new Error("aborted");
         const n = nums[next++];
         try {
           const canvas = await render(n);
           hooks.onRequest?.();
-          if (hooks.math) {
-            const txt = cleanMathText(await readMathPage(mathEngine(w), grayOf(canvas)));
-            canvas.width = canvas.height = 0;
+          let text: string | null = null;
+          if (!hooks.math) text = await aiRead(canvas);
+          if (text !== null) {
+            out[n] = cleanOcr(text);                      // the AI copies the page exactly: no spelling rules are applied to it
+          } else if (hooks.math) {
+            const eng = await tess();
+            const txt = cleanMathText(await readMathPage(mathEngine(eng), grayOf(canvas)));
             out[n] = cleanOcr(txt);
           } else {
-            const { data } = await w.recognize(canvas);
-            canvas.width = canvas.height = 0;
-            out[n] = cleanOcr(data.text || "");
+            const { data } = await (await tess()).recognize(canvas);
+            out[n] = arabic ? fixArabicPage(cleanOcr(data.text || "")) : cleanOcr(data.text || "");
           }
+          canvas.width = canvas.height = 0;
           hooks.onPage?.(n, out[n]);
         } catch (e) {
           if (signal.aborted) throw e;
@@ -173,7 +231,7 @@ export async function ocrPages(
         hooks.onProgress?.(finished, nums.length);
       }
     };
-    await Promise.all(workers.map(run));
+    await Promise.all(Array.from({ length: count }, run));
   } catch (e) {
     if (signal.aborted) throw new Error("aborted");
     if (!Object.keys(out).length) throw new OcrError("error", "تعذّر تشغيل قارئ النصوص (OCR). تأكد من وجود المجلدين public/tesseract و public/tessdata ثم أعد المحاولة.");
@@ -182,7 +240,9 @@ export async function ocrPages(
     doc.destroy?.();
   }
   if (signal.aborted) throw new Error("aborted");
-  if (!Object.keys(out).length) throw new OcrError("error", "تعذّرت قراءة الصفحات الممسوحة.");
+  if (!Object.keys(out).length) throw new OcrError("error", setupFailed
+    ? "تعذّر تشغيل قارئ النصوص (OCR). تأكد من وجود المجلدين public/tesseract و public/tessdata ثم أعد المحاولة."
+    : "تعذّرت قراءة الصفحات الممسوحة.");
   return out;
 }
 
@@ -454,7 +514,7 @@ const ORD = ["الأول", "الثاني", "الثالث", "الرابع", "ال
 
 const SHEET_W = 210, SHEET_H = 296;    // mm: one A4 sheet
 const M_TOP = 12, M_SIDE = 15;         // mm: sheet margins
-const CONTENT_H = 274;                 // mm: usable height for the content on a sheet (no footer)
+const CONTENT_H = 266;                 // mm: usable height for the content on a sheet (the rest of the sheet is the footer: teacher name + phone)
 const WM_W = 104;                      // mm: watermark width on the paper
 const WM_H = WM_W / WM_ASPECT;         // mm
 const WM_OPACITY = 0.07;               // faint enough to write over
@@ -467,7 +527,19 @@ const fontCss = (origin: string) => {
     `@font-face{font-family:CairoP;font-weight:${w};font-style:normal;font-display:block;src:url(${origin}/fonts/cairo-${sub}-${w}.woff2) format("woff2");unicode-range:${r}}`)).join("\n");
 };
 
-export function examHtml(e: Exam, v: string, key = false): string {
+// A story question: the title, the story in a box, then its questions (a, b, c...) each with an answer line (or the model answer on the teacher's copy).
+// q.text = the story (first line = title when it is short), q.choices = "question ||| answer" pairs.
+function renderStory(q: Q, n: number, key: boolean): string {
+  const lines = q.text.split("\n").map((x) => x.trim()).filter(Boolean);
+  const title = lines.length > 1 && lines[0].length <= 70 && !/[.!?]$/.test(lines[0]) ? lines.shift()! : "";
+  const body = lines.map((l) => `<p>${esc(l)}</p>`).join("");
+  const subs = q.choices.map((c) => { const [a, ...r] = c.split("|||"); return [a.trim(), r.join("|||").trim()] as [string, string]; });
+  const LET = ["a", "b", "c", "d", "e", "f"];
+  const qs = subs.map(([a, b], i) => `<li><b>${LET[i] ?? i + 1}</b><div><span class="sqt">${esc(a)}</span>${key && b ? `<div class="model"><b>Answer:</b> ${esc(b)}</div>` : `<div class="ln"></div>`}</div></li>`).join("");
+  return `<section dir="ltr"><p class="q"><span class="n">${n}</span><span class="qt">${esc(title || "Read the story and answer the questions:")}</span></p><div class="story">${body}</div><ol class="sq">${qs}</ol></section>`;
+}
+
+export function examHtml(e: Exam, v: string, key = false, teacher?: Teacher | null): string {
   const origin = typeof location !== "undefined" ? location.origin : "";
   const all = versionQuestions(e, v);
   // group by question type (MCQ, then true/false, then essay) and number continuously
@@ -483,6 +555,7 @@ export function examHtml(e: Exam, v: string, key = false): string {
   const T = (t: string) => (isMath ? mathHtml(t) : esc(t));
   const renderQ = (q: Q) => {
     n++;
+    if (q.kind === "story") return renderStory(q, n, key);
     const ar = /[؀-ۿ]/.test(q.text);
     const L = ar ? AR : EN;
     const tfAns = q.answer === "true" ? (ar ? "صح" : "True") : q.answer === "false" ? (ar ? "خطأ" : "False") : "";
@@ -542,18 +615,35 @@ export function examHtml(e: Exam, v: string, key = false): string {
   };
 
   // flat list of blocks (header, headings, questions). The pager measures them and fills the sheets.
+  // map questions: the picture is printed ONCE above the questions that belong to it (the pager keeps the picture with its first question)
+  const questionBlocks = (g: { kind: Q["kind"]; qs: Q[] }): string[] => {
+    if (g.kind !== "map") return g.qs.map(renderQ);
+    const byMap = new Map<string, Q[]>();
+    for (const q of g.qs) { const id = q.mapId ?? ""; byMap.set(id, [...(byMap.get(id) ?? []), q]); }
+    return [...byMap].flatMap(([id, list]) => {
+      const src = e.maps?.[id];
+      return [...(src ? [`<div class="mapbox"><img src="${src}" alt=""></div>`] : []), ...list.map(renderQ)];
+    });
+  };
   const groupBlocks = groups.flatMap((g, gi) => [
     en
       ? `<h2><span>${bdi(`Question ${ORD_EN[gi] ?? gi + 1}: ${g.title}`)}</span><span class="cnt">${bdi(`${g.qs.length} ${g.qs.length === 1 ? "question" : "questions"}`)}</span></h2>`
       : `<h2><span>السؤال ${ORD[gi] ?? ""}: ${g.title}</span><span class="cnt">${g.qs.length} ${g.qs.length === 1 ? "سؤال" : "أسئلة"}</span></h2>`,
-    ...g.qs.map(renderQ),
+    ...questionBlocks(g),
   ]);
   const total = all.length;
   const keyBox = key && summary.length ? `<div class="sum"><h3>${en ? bdi("Answer summary") : "ملخص الإجابات"}</h3><div class="grid">${summary.join("")}</div></div>` : "";
+  const subj = getSubject(e.subject);
+  const subjectName = subj ? (en ? bdi("English") : `مادة ${esc(subj.name)}`) : "";
+  // footer of every sheet: the teacher who prints the exam (name + the phone he gave when he subscribed)
+  const tName = (teacher?.name ?? "").trim(), tPhone = (teacher?.phone ?? "").trim();
+  const footer = tName || tPhone
+    ? `<div id="ft" class="foot">${tName ? `<span>${en ? bdi("Teacher:") : "المعلم:"} <b>${en ? bdi(tName) : esc(tName)}</b></span>` : "<span></span>"}${tPhone ? `<span>${en ? bdi("Phone:") : "الهاتف:"} <b>${bdi(tPhone)}</b></span>` : "<span></span>"}</div>`
+    : "";
   const header = `<div class="hdr">
 <div class="top">
   <div class="brand"><img src="${LOGO_DATA_URI}" alt=""><div><b>${CENTER_NAME}</b><small>${en ? bdi(key ? "Answer key" : "Exam paper") : key ? "نموذج الإجابة" : "ورقة اختبار"}</small></div></div>
-  <div class="ttl"><h1>${esc(e.title)}</h1></div>
+  <div class="ttl">${subjectName ? `<span class="subj">${subjectName}</span>` : ""}<h1>${esc(e.title)}</h1></div>
   <div class="ver"><small>${en ? bdi("Model") : "النموذج"}</small><span>${v}</span></div>
 </div>
 ${key ? "" : `<div class="info">
@@ -573,6 +663,11 @@ ${key ? "" : `<div class="info">
   // [watermark image] + [the blocks that fit]. A heading is never left alone at the bottom of a sheet.
   const PAGER = `(function(){
 var CAP=${CONTENT_H},started=false;
+function imgsReady(){
+  var im=document.images,ps=[];
+  for(var i=0;i<im.length;i++){var x=im[i];if(!x.complete){ps.push(new Promise(function(r){x.onload=x.onerror=r;}));}}
+  return Promise.all(ps);
+}
 function run(){
   if(started)return;started=true;
   var m=document.getElementById('measure'),out=document.getElementById('out'),wm=document.getElementById('wm');
@@ -588,7 +683,7 @@ function run(){
   function fits(i){return bots[i]-tops[start]<=cap;}
   for(var i=0;i<blocks.length;i++){
     var ok=fits(i);
-    if(ok&&blocks[i].tagName==='H2'&&i+1<blocks.length&&!fits(i+1))ok=false;
+    if(ok&&(blocks[i].tagName==='H2'||blocks[i].className==='mapbox')&&i+1<blocks.length&&!fits(i+1))ok=false;
     if(!ok&&cur.length){pages.push(cur);cur=[];start=i;}
     cur.push(blocks[i]);
   }
@@ -596,6 +691,7 @@ function run(){
   pages.forEach(function(list,pi){
     var s=document.createElement('div');s.className='sheet';
     var w=wm.cloneNode(true);w.removeAttribute('id');s.appendChild(w);
+    var ftEl=document.getElementById('ft');if(ftEl){var f=ftEl.cloneNode(true);f.removeAttribute('id');s.appendChild(f);}
     var c=document.createElement('div');c.className='content';
     list.forEach(function(b){c.appendChild(b);});s.appendChild(c);
     if(pi<pages.length-1&&list.length>1){
@@ -616,7 +712,7 @@ setTimeout(run,3500);
 try{
   var sample='\\u0633\\u0646\\u062a\\u0631 \\u0627\\u0644\\u0646\\u0648\\u0631 ABC 123';
   Promise.all([document.fonts.load('400 14px CairoP',sample),document.fonts.load('600 14px CairoP',sample),document.fonts.load('800 14px CairoP',sample)])
-    .then(function(){setTimeout(run,50);},function(){setTimeout(run,50);});
+    .then(imgsReady,imgsReady).then(function(){setTimeout(run,50);},function(){setTimeout(run,50);});
 }catch(e){window.addEventListener('load',run);}
 })();`;
 
@@ -641,6 +737,7 @@ body{font-family:CairoP,Cairo,Tahoma,Arial,sans-serif;-webkit-text-size-adjust:1
 .brand{display:flex;align-items:center;gap:10px}.brand img{width:50px;height:50px}
 .brand b{display:block;font-size:16px;font-weight:800;line-height:1.25}.brand small{display:block;font-size:11px;color:#444;font-weight:600}
 .ttl{text-align:center}.ttl h1{margin:0;font-size:21px;font-weight:800;line-height:1.35}
+.subj{display:inline-block;margin:0 0 5px;padding:1px 16px 2px;border:1.6px solid #111;border-radius:99px;background:#111;color:#fff;font-size:12.5px;font-weight:800;line-height:1.55}
 .ver{justify-self:end;display:flex;flex-direction:column;align-items:center;gap:2px}
 .ver small{font-size:10.5px;font-weight:700;color:#444}
 .ver span{display:flex;align-items:center;justify-content:center;width:50px;height:50px;border:2.5px solid #111;border-radius:10px;background:#111;color:#fff;font-weight:800;font-size:28px;line-height:1}
@@ -693,10 +790,26 @@ sup.pw{font-size:.68em;line-height:0;vertical-align:super}
 .bl{display:inline-block;min-width:70px;border-bottom:1.2px solid #111;height:1em;vertical-align:baseline;margin:0 3px}
 .model{margin:2px 30px 0 0;padding:4px 10px;background:#f1f1f1;border-right:3px solid #111;border-radius:3px;font-size:12.5px}
 .why{margin:3px 30px 0 0;padding:2px 10px;border-right:3px solid #999;font-size:11.5px;color:#333}
+/* footer: the teacher's name and phone, at the bottom of every sheet */
+#ft{display:none}
+.sheet>.foot{display:flex;justify-content:space-between;align-items:center;gap:12px;position:absolute;z-index:1;left:${M_SIDE}mm;right:${M_SIDE}mm;bottom:6mm;padding:3px 2px 0;border-top:1.2px solid #111;font-size:11.5px;color:#222}
+.foot b{font-weight:800}
+/* a map cut out of the book, printed above its questions */
+.mapbox{margin:2px 0 6px;padding:5px;border:1.2px solid #999;border-radius:6px;text-align:center;background:#fff}
+.mapbox img{display:inline-block;max-width:100%;max-height:92mm;width:auto;height:auto;object-fit:contain;vertical-align:top}
+/* a story question (English): the story in a box, then its questions a, b, c... */
+.story{margin:4px 0 6px;margin-inline-start:30px;padding:6px 12px;border:1.5px solid #111;border-radius:6px;background:#f6f6f6;font-size:13px;line-height:1.6;text-align:left}
+.story p{margin:0 0 3px}.story p:last-child{margin:0}
+.sq{list-style:none;margin:0 0 0;padding:0;margin-inline-start:30px;text-align:left}
+.sq li{display:flex;gap:8px;align-items:flex-start;margin:0 0 3px}
+.sq li>b{flex:none;width:19px;height:19px;border:1.4px solid #111;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;margin-top:2px;line-height:1}
+.sq li>div{flex:1 1 auto;min-width:0}.sq .sqt{display:block;font-weight:600;padding-top:1px}
+.sq .ln{margin:0}.sq .model{margin:2px 0 0;border-right:0;border-left:3px solid #111}
 .end{margin:10px 0 0;text-align:center;font-size:12px;font-weight:700;color:#333}
 .end span{display:inline-block;padding:3px 22px;border-top:1.5px solid #111;border-bottom:1.5px solid #111}
 </style></head><body>
 <img id="wm" class="wm" src="${WM_DATA_URI}" alt="">
+${footer}
 <div id="measure">${header}${keyBox}${groupBlocks.join("")}${end}</div>
 <div id="out"></div>
 <script>${PAGER}</script>
@@ -808,8 +921,8 @@ function showPdfSheet(blob: Blob, name: string, onClose: () => void) {
 
 // Phone -> a sheet with "Share / Save" is shown ("sheet"). Computer -> the PDF file is downloaded straight away ("saved").
 // Throws if the file could not be made (there is no print-dialog fallback any more).
-export async function exportExam(e: Exam, v: string, key = false): Promise<"sheet" | "saved"> {
-  const html = examHtml(e, v, key);
+export async function exportExam(e: Exam, v: string, key = false, teacher?: Teacher | null): Promise<"sheet" | "saved"> {
+  const html = examHtml(e, v, key, teacher);
   const f = document.createElement("iframe");
   f.style.cssText = "position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0";
   document.body.appendChild(f);

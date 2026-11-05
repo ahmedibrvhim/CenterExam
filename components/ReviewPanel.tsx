@@ -4,7 +4,7 @@ import type { Q } from "@/exam";
 import { kindLabel } from "@/lib/subjects";
 
 // One place in the exam. While the AI writes a replacement the slot is "loading".
-export type Slot = { id: string; kind: Q["kind"]; q?: Q; state: "ok" | "loading" | "failed"; err?: string };
+export type Slot = { id: string; kind: Q["kind"]; q?: Q; state: "ok" | "loading" | "failed"; err?: string; mapId?: string };
 
 // The questions the AI wrote, waiting for the teacher's review. Nothing is saved (and no PDF exists) until she confirms.
 export type Draft = {
@@ -16,6 +16,8 @@ export type Draft = {
   difficulty: string; topic: string;
   subject?: string; stage?: string | null; level?: number | null; branch?: string; focus?: string[]; // from the subject picker / file analysis (used again for replacement questions)
   removed: string[];         // texts of deleted questions, so the replacement is never the same question again
+  age?: number | null;       // reading age of the pupils (stories)
+  mapData?: Array<{ id: string; dataUrl: string; hint: string }>; // maps found in the book (social studies)
   target: number;
 };
 
@@ -67,11 +69,13 @@ export default function ReviewPanel({ draft, onRemove, onRetry, onDrop, onConfir
               <div className="lq-main" dir="auto">
                 {s.state === "ok" && s.q && (
                   <>
-                    <p>{s.q.text}</p>
+                    {s.q.mapId && draft.mapData?.find((m) => m.id === s.q!.mapId) && <img src={draft.mapData.find((m) => m.id === s.q!.mapId)!.dataUrl} alt="" style={{ maxWidth: "100%", maxHeight: 180, borderRadius: 6, border: "1px solid #bbb", marginBottom: 6 }} />}
+                    <p style={s.q.kind === "story" ? { whiteSpace: "pre-wrap" } : undefined}>{s.q.text}</p>
+                    {s.q.kind === "story" && <ol dir="ltr">{s.q.choices.map((c, k) => <li key={k}>{c.replace(" ||| ", "  →  ")}</li>)}</ol>}
                     {s.q.kind === "mcq" && <ul>{s.q.choices.map((c, k) => <li key={k} className={c === s.q!.answer ? "ok" : ""}>{c}</li>)}</ul>}
                     {s.q.kind === "match" && <ul>{s.q.choices.map((c, k) => <li key={k} dir="auto">{c.replace(" ||| ", "  ⟷  ")}</li>)}</ul>}
                     {s.q.kind === "tf" && s.q.answer && <span className="lq-ans">✓ {s.q.answer === "true" ? (isAr(s.q.text) ? "صح" : "True") : isAr(s.q.text) ? "خطأ" : "False"}</span>}
-                    {s.q.kind !== "mcq" && s.q.kind !== "tf" && s.q.kind !== "match" && s.q.answer && <p className="pv-ans" style={{ whiteSpace: "pre-wrap" }}>✓ {s.q.answer}</p>}
+                    {s.q.kind !== "mcq" && s.q.kind !== "tf" && s.q.kind !== "match" && s.q.kind !== "story" && s.q.answer && <p className="pv-ans" style={{ whiteSpace: "pre-wrap" }}>✓ {s.q.answer}</p>}
                   </>
                 )}
                 {s.state === "loading" && <div className="gen-empty"><span className="spinner" /> يكتب الذكاء الاصطناعي سؤالًا بديلًا ({kindLabel(draft.subject, s.kind)})…</div>}
