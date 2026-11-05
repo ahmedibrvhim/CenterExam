@@ -63,15 +63,23 @@ export async function scanMaps(file: File, pages: number[], signal: AbortSignal)
       if (signal.aborted) throw new Error("aborted");
       let small: HTMLCanvasElement | null = null;
       try {
-        small = await renderWidth(doc, n, FIND_W);
-        const px = small.getContext("2d")!.getImageData(0, 0, small.width, small.height);
+        // 1) the pictures placed on the page: exact and cheap (no pixels to look at)
+        const pg = await doc.getPage(n);
+        const vp = pg.getViewport({ scale: FIND_W / pg.getViewport({ scale: 1 }).width });
         let regions: Box[] = [];
-        try { const pg = await doc.getPage(n); regions = await imageBoxes(pdfjs, pg, pg.getViewport({ scale: small.width / pg.getViewport({ scale: 1 }).width })); } catch {}
-        if (!regions.length) regions = findGraphicRegions({ data: px.data, width: small.width, height: small.height });
+        try { regions = await imageBoxes(pdfjs, pg, vp); } catch {}
+        // 2) only when the page has none (a scan, a drawing made of lines): render it small and look for the map in the pixels (heavy: the page is kept responsive around it)
+        if (!regions.length) {
+          await new Promise((r) => setTimeout(r, 30));
+          small = await renderWidth(doc, n, FIND_W);
+          const px = small.getContext("2d")!.getImageData(0, 0, small.width, small.height);
+          await new Promise((r) => setTimeout(r, 0));
+          regions = findGraphicRegions({ data: px.data, width: small.width, height: small.height });
+        }
         regions = regions.slice(0, MAX_PER_PAGE);
         if (!regions.length) continue;
         const big = await renderWidth(doc, n, CUT_W);
-        const k = big.width / small.width;
+        const k = big.width / vp.width;
         for (const r of regions) {
           const m = 8; // a little margin so a thin border line is not cut in half
           const sx = Math.max(0, Math.round((r.x - m) * k)), sy = Math.max(0, Math.round((r.y - m) * k));

@@ -27,9 +27,13 @@ export default function Header({ subject, onChangeSubject }: { subject?: Subject
   useEffect(() => { const f = () => setKeyOpen(true); window.addEventListener("open-gemini-key", f); return () => window.removeEventListener("open-gemini-key", f); }, []);
 
   // Subscription state shown in the bar: which subject(s) are open and how long is left.
-  const main = active.find((e) => e.subject === "all") ?? [...active].sort((a, b) => b.expiresAt - a.expiresAt)[0];
-  const extra = main && main.subject !== "all" ? active.length - 1 : 0;
+  // Inside a subject its name is already shown next to the bar, so the subscription pill shows only the plan that covers THIS subject (trial / time left).
+  const here = s ? (active.find((e) => e.subject === s.id) ?? active.find((e) => e.subject === "all")) : undefined;
+  const main = here ?? active.find((e) => e.subject === "all") ?? [...active].sort((a, b) => b.expiresAt - a.expiresAt)[0];
+  const extra = !here && main && main.subject !== "all" ? active.length - 1 : 0;
+  const timeTxt = (e: typeof main) => (isForever(e) ? "دائم ∞" : `متبقٍّ ${leftText(e, now)}`);
   const sub = isAdmin ? { cls: "ok", text: "👑 مدير" }
+    : here ? { cls: isLow(here, now) ? "warn" : "ok", text: `${isTrial(here) ? "تجربة مجانية · " : "مشترك · "}${timeTxt(here)}` }
     : main ? { cls: isLow(main, now) ? "warn" : "ok", text: `${isTrial(main) ? "تجربة مجانية · " : ""}${entLabel(main.subject)}${extra ? ` +${extra}` : ""} · ${isForever(main) ? "دائم ∞" : leftText(main, now)}` }
     : order ? { cls: "warn", text: "طلب قيد التفعيل" }
     : { cls: "bad", text: "غير مشترك" };

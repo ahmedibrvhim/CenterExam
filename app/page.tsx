@@ -496,15 +496,21 @@ export default function Home() {
       for (const it of pool) { if (have.map >= quota.map) break; push({ kind: "map", text: it.t, choices: [], answer: "", mapId: it.id }); }
       // the book had fewer map questions than wanted (or none that could be read): the AI writes the rest by looking at the map picture
       for (const m of maps) {
-        const need = quota.map - have.map;
-        if (need <= 0 || ctrl.signal.aborted) break;
+        if (quota.map - have.map <= 0 || ctrl.signal.aborted) break;
         if (m.questions.length >= 3 || (m.ctx ?? "").trim().length < 200) continue;
-        try {
-          const wait = lastReq + 12500 - Date.now(); if (lastReq && wait > 0) await sleep(wait, ctrl.signal);
-          lastReq = Date.now();
-          { const n = recordRequest(); setUsage((u) => (shared ? u + 1 : n)); }
-          await streamBatch({ context: m.ctx, want: { map: Math.min(3, need) }, avoid: got.slice(-40).map((q) => q.text), difficulty, topic: topic.trim(), subject: subject?.id, stage, level, branch, focus, age, maps: [{ id: m.id, dataUrl: m.dataUrl, hint: m.hint ?? "" }] }, ctrl.signal, push);
-        } catch { if (ctrl.signal.aborted) { stopAll = true; break; } }
+        for (let attempt = 0; attempt < 3 && quota.map - have.map > 0; attempt++) {
+          const want = Math.max(1, Math.ceil(Math.min(3, quota.map - have.map) / (attempt + 1)));   // each retry asks for fewer, so it finishes in time
+          let fail: Fail | null;
+          try {
+            const wait = lastReq + 12500 - Date.now(); if (lastReq && wait > 0) await sleep(wait, ctrl.signal);
+            lastReq = Date.now();
+            { const n = recordRequest(); setUsage((u) => (shared ? u + 1 : n)); }
+            fail = await streamBatch({ context: m.ctx, want: { map: want }, avoid: got.slice(-40).map((q) => q.text), difficulty, topic: topic.trim(), subject: subject?.id, stage, level, branch, focus, age, maps: [{ id: m.id, dataUrl: m.dataUrl, hint: m.hint ?? "" }] }, ctrl.signal, push);
+          } catch { if (ctrl.signal.aborted) { stopAll = true; break; } fail = { code: "network", message: "" }; }
+          if (!fail || fail.code === "rate_day") break;
+          if (fail.code === "rate_minute") { try { await sleep(clamp((fail.retryAfter ?? 20) * 1000, 5000, 60000), ctrl.signal); } catch { stopAll = true; break; } }
+        }
+        if (stopAll) break;
       }
       if (have.map < quota.map) { mapNote = `تم الحصول على ${have.map} سؤال خريطة فقط (المطلوب ${quota.map})`; quota.map = have.map; }
     } else quota.map = 0;
@@ -525,7 +531,10 @@ export default function Home() {
       }
       if (!Object.keys(wantNow).length) continue; // nothing in this group suits the types still missing
       const sumOf = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0);
-      while (sumOf(wantNow) > 6) { const big = Object.keys(wantNow).sort((a, b) => wantNow[b] - wantNow[a])[0]; wantNow[big]--; }
+      const BATCH_MAX = subject?.id === "social" ? 4 : 6;   // social studies answers are long: a big batch runs past the time limit
+      while (sumOf(wantNow) > BATCH_MAX) { const big = Object.keys(wantNow).sort((a, b) => wantNow[b] - wantNow[a])[0]; wantNow[big]--; }
+      for (const k of Object.keys(wantNow)) if (wantNow[k] <= 0) delete wantNow[k]; // a type reduced to 0 must NOT come back as 1 (that made a batch of 14)
+      if (!Object.keys(wantNow).length) continue;
       const avoid = got.slice(-40).map((q) => q.text); // so the next copies get questions that differ from the ones already written
       setGen((g) => (g ? { ...g, batch: gi + 1 } : g));
       for (let attempt = 0; ; attempt++) {
