@@ -85,6 +85,11 @@ export async function assertSubjectAccess(u: AuthedUser, subject: string) {
     cache.set(u.uid, hit);
     if (cache.size > 500) cache.clear();
   }
+  if (!covers(hit.ents, subject, now)) { // maybe a code was just redeemed on another server instance: look again before refusing
+    const s = await db().collection("users").doc(u.uid).get();
+    hit = { at: now, ents: ((s.data()?.entitlements as Entitlement[]) ?? []) };
+    cache.set(u.uid, hit);
+  }
   if (!covers(hit.ents, subject, now)) throw new ApiError(403, "no_access", "لا يشمل اشتراكك هذه المادة أو انتهى اشتراكك. فعّل كودًا جديدًا من زر «اشتراكي».");
 }
 export const dropAccessCache = (uid: string) => cache.delete(uid);

@@ -7,6 +7,7 @@ export type Exam = {
   id: string; title: string; sources: string[]; questions: Q[];
   versions: string[]; seed: number; shuffleQ: boolean; shuffleA: boolean; date: string;
   createdAt: number; info?: string;
+  ownerUid?: string; // the account that made it: the library only shows a teacher his own exams (older exams have none and are not shown)
   sets?: Q[][]; // one DIFFERENT set of questions per version (sets[i] belongs to versions[i]). Missing in exams saved by older releases.
   subject?: string; stage?: string; // set by the subject picker (older exams have none)
   grade?: string; // total mark the teacher typed (printed in the "الدرجة" box); no marks are printed per question

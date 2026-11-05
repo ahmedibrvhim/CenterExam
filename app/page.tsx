@@ -4,6 +4,7 @@ import Header from "@/components/Header";
 import SubjectGate from "@/components/SubjectGate";
 import { useAccess } from "@/components/AccessProvider";
 import { authFetch } from "@/lib/authFetch";
+import { useAuth } from "@/components/AuthProvider";
 import AiStatus from "@/components/AiStatus";
 import GenerationPanel, { Gen } from "@/components/GenerationPanel";
 import Library from "@/components/Library";
@@ -88,6 +89,7 @@ export default function Home() {
   const [grade, setGrade] = useState(""); // total mark printed on the exam sheet (optional)
   // how many questions of each type ONE copy of the exam has (text, so typing "30" is not interrupted; clamped only when used)
   const { can, active, isAdmin, refresh } = useAccess();
+  const uid = useAuth().user?.uid ?? "";
   const [subjectId, setSubjectId] = useState<SubjectId | null | undefined>(undefined); // undefined = still reading the saved choice
   const subject = getSubject(subjectId);
   const [forced, setForced] = useState<Kind[]>([]);      // question types the teacher switched on although the pages do not seem to fit
@@ -123,10 +125,21 @@ export default function Home() {
     window.addEventListener("focus", onFocus);
     const onKeyChanged = (e: Event) => { const h = (e as CustomEvent).detail?.hasKey; if (typeof h === "boolean") setNoKey(!h); void syncKey(); }; // hide / show the "add your key" banner right away
     window.addEventListener("gemini-key-changed", onKeyChanged);
-    listExams().then(setExams).catch(() => notify("تعذّر فتح قاعدة البيانات المحلية (قد يكون المتصفح في وضع التصفح الخفي)", "error")).finally(() => setLoadingDb(false));
     try { navigator.storage?.persist?.(); } catch {} // ask the browser not to delete our data when disk space is low
     return () => { window.removeEventListener("focus", onFocus); window.removeEventListener("gemini-key-changed", onKeyChanged); };
   }, []);
+
+  // this account's saved exams (reloaded when another account signs in on the same browser)
+  useEffect(() => {
+    setExams([]); setLoadingDb(true);
+    let live = true;
+    listExams(uid).then((l) => { if (live) setExams(l); }).catch(() => notify("تعذّر فتح قاعدة البيانات المحلية (قد يكون المتصفح في وضع التصفح الخفي)", "error")).finally(() => { if (live) setLoadingDb(false); });
+    return () => { live = false; };
+  }, [uid]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // the free trial / a new subscription changes which key the server uses (trial + admin: the site's key): ask again instead of waiting for a refresh
+  const accessSig = `${isAdmin}|${active.map((e) => `${e.subject}:${e.term ?? ""}`).join(",")}`;
+  useEffect(() => { void syncKey(); }, [accessSig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Which API key does the server use now? The request counter and the "limit reached" state belong to ONE key:
   // a different key starts from 0, and a key that already hit its limit (even from another device) shows it right away.
@@ -315,7 +328,7 @@ export default function Home() {
       date: new Date().toLocaleDateString("ar-EG"), createdAt: Date.now(), info, grade: meta.grade, subject: meta.subject, stage: meta.stage,
     };
     setExams((p) => [e, ...p]);
-    try { await saveExam(e); } catch { notify("تعذّر الحفظ الدائم — الاختبار متاح حتى إغلاق الصفحة فقط", "error"); }
+    try { await saveExam(uid, e); } catch { notify("تعذّر الحفظ الدائم — الاختبار متاح حتى إغلاق الصفحة فقط", "error"); }
   };
 
   // back to the state of a freshly opened tool (the saved exams in the library stay)
@@ -672,11 +685,11 @@ export default function Home() {
   };
   const del = async (id: string) => {
     setExams((p) => p.filter((e) => e.id !== id));
-    try { await removeExam(id); notify("تم حذف الاختبار", "success"); } catch { notify("تعذّر الحذف من قاعدة البيانات", "error"); }
+    try { await removeExam(uid, id); notify("تم حذف الاختبار", "success"); } catch { notify("تعذّر الحذف من قاعدة البيانات", "error"); }
   };
   const update = async (e: Exam) => {
     setExams((p) => p.map((x) => (x.id === e.id ? e : x)));
-    try { await saveExam(e); } catch { notify("تعذّر حفظ التعديل", "error"); }
+    try { await saveExam(uid, e); } catch { notify("تعذّر حفظ التعديل", "error"); }
   };
 
   const totalVersions = exams.reduce((n, e) => n + e.versions.length, 0);

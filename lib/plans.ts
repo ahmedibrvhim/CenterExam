@@ -70,7 +70,9 @@ export const isLow = (e: Entitlement, now: number) => !isForever(e) && (isTrial(
 //   month / year (or `days` for the admin's manual "+N days") -> still active: the time is added after its end; expired / missing / trial: starts now
 //   a forever right is never shortened or replaced by a timed one
 export function grantTerm(list: Entitlement[] | undefined, key: EntKey, term: Term, code: string, now: number, days?: number): Entitlement[] {
-  const out = (list ?? []).map((e) => ({ ...e }));
+  // A paid right must open ONLY what was bought. A still-running free trial covers ALL subjects, so it ends the moment a paid right is granted
+  // (otherwise a single-subject code would keep every subject open until the trial window ran out).
+  const out = (list ?? []).map((e) => (term !== "trial" && isTrial(e) && isActive(e, now) ? { ...e, expiresAt: now } : { ...e }));
   const i = out.findIndex((e) => e.subject === key);
   const cur = i < 0 ? null : out[i];
   const put = (e: Entitlement) => { if (i < 0) out.push(e); else out[i] = e; };

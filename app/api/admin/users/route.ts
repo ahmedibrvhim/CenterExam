@@ -1,3 +1,4 @@
+import { dropTrialCache } from "@/lib/server/trial";
 import { ApiError, db, dropAccessCache, handle, readJson, requireAdmin, trialKey } from "@/lib/server/admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { grantTerm, isPaidTerm, type EntKey, type Entitlement } from "@/lib/plans";
@@ -43,7 +44,7 @@ export async function POST(req: Request) {
       tx.update(ref, { entitlements: list, subscribed: true });
       return list;
     });
-    dropAccessCache(uid);
+    dropAccessCache(uid); dropTrialCache(uid);
     return { ok: true, entitlements: ents };
   });
 }

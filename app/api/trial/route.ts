@@ -1,3 +1,4 @@
+import { dropTrialCache } from "@/lib/server/trial";
 import { ApiError, db, dropAccessCache, handle, readJson, requireUser, trialKey } from "@/lib/server/admin";
 import { cleanName, cleanPhone, grantTerm, isTrial, TRIAL_MS, type Entitlement } from "@/lib/plans";
 
@@ -31,7 +32,7 @@ export async function POST(req: Request) {
       return { ok: true as const, entitlements: list, now, endsAt: now + TRIAL_MS, profile: { name, phone } };
     });
     if ("err" in res && res.err) throw new ApiError(res.err[0], res.err[1], res.err[2]);
-    dropAccessCache(u.uid);
+    dropAccessCache(u.uid); dropTrialCache(u.uid);
     return res;
   });
 }

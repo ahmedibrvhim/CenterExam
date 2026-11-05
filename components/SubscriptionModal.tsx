@@ -39,6 +39,7 @@ export default function SubscriptionModal() {
           <p className="hint">الاشتراك لا يُجدَّد ولا يُشترى من جديد قبل انتهائه. عند انتهاء مادة تظهر مقفلة في صفحة المواد، وتجدّدها من هناك.</p>
         </> : <>
           <h3>{order ? "طلبك الحالي" : "اشتراك"}</h3>
+          {order && one && order.plan === "single" && order.subject !== one.id && <p className="login-err" role="status">طلبك الحالي لمادة «{entLabel(order.subject)}» فقط، وكوده لن يفتح {one.name}. لطلب {one.name} ألغِ الطلب الحالي أولًا من الأسفل.</p>}
           <SubscribeFlow onDone={closePlans} subject={one?.id ?? null} />
           <p className="hint">الشهري 30 يومًا والسنوي 365 يومًا من لحظة التفعيل. الاشتراك الدائم لا ينتهي، والتجربة المجانية ملف PDF واحد مرة لكل مستخدم.</p>
         </>}

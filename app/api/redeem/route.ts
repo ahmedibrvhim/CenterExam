@@ -1,3 +1,4 @@
+import { dropTrialCache } from "@/lib/server/trial";
 import { ApiError, db, dropAccessCache, handle, readJson, requireUser } from "@/lib/server/admin";
 import { ACTIVE_MSG, grantTerm, isCodeShape, normalizeCode, paidCover, termOf, type CodeDoc, type Entitlement, type OrderDoc } from "@/lib/plans";
 
@@ -43,7 +44,7 @@ export async function POST(req: Request) {
     });
 
     if ("err" in res && res.err) throw new ApiError(res.err[0], res.err[1], res.err[2]);
-    dropAccessCache(u.uid);
+    dropAccessCache(u.uid); dropTrialCache(u.uid);
     return res;
   });
 }

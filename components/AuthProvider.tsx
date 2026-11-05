@@ -70,7 +70,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     const auth = getFirebaseAuth();
     if (auth) await fbSignOut(auth);
-    try { sessionStorage.removeItem("centerapp-splash-seen"); } catch {} // next login plays the intro again
+    try { sessionStorage.removeItem("centerapp-splash-seen"); sessionStorage.removeItem("centerapp-subject"); } catch {} // next login plays the intro again
     document.documentElement.removeAttribute("data-splash");
   }, []);
 

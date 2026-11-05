@@ -1,5 +1,6 @@
 // Saves generated exams in the browser (IndexedDB) so they can be printed / downloaded again later.
-// Stored per browser on this computer. Questions are saved, and PDFs are rebuilt from them on demand.
+// Every exam belongs to ONE account (ownerUid): two teachers signing in on the same browser never see each other's exams.
+// Questions are saved, and PDFs are rebuilt from them on demand.
 import type { Exam } from "@/exam";
 
 const DB_NAME = "centerapp-exams", STORE = "exams";
@@ -24,9 +25,14 @@ async function run<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRe
   });
 }
 
-export async function listExams(): Promise<Exam[]> {
+export async function listExams(uid: string): Promise<Exam[]> {
+  if (!uid) return [];
   const all = await run<Exam[]>("readonly", (s) => s.getAll());
-  return all.sort((a, b) => b.createdAt - a.createdAt);
+  return all.filter((e) => e.ownerUid === uid).sort((a, b) => b.createdAt - a.createdAt);
 }
-export const saveExam = (e: Exam) => run("readwrite", (s) => s.put(e)).then(() => undefined);
-export const removeExam = (id: string) => run("readwrite", (s) => s.delete(id)).then(() => undefined);
+export const saveExam = (uid: string, e: Exam) => run("readwrite", (s) => s.put({ ...e, ownerUid: uid })).then(() => undefined);
+export async function removeExam(uid: string, id: string): Promise<void> {
+  const cur = await run<Exam | undefined>("readonly", (s) => s.get(id));
+  if (!cur || cur.ownerUid !== uid) return; // never delete another account's exam
+  await run("readwrite", (s) => s.delete(id));
+}
