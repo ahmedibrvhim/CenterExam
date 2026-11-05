@@ -361,15 +361,31 @@ export default function Home() {
           if (!pgs.length) continue;
           const shots = await scanMaps(f.file, pgs.slice(0, 20), ctrl.signal);
           // the questions printed on the same page belong to the first (largest) map of the page; when the page has none, the next page may carry them
+          // The text layer of many PDFs (Word exports, scans with a hidden layer) is scrambled: "الححيحة" for "الصحيحة", numbers moved, letters split.
+          // Every map page whose own text gives fewer than 3 questions is therefore READ AGAIN from its picture (local OCR: free, no quota, ~3-6 s per page),
+          // and the questions / notes are taken from that clean text. Pages with a good text layer are not OCR'd at all.
+          const mapPages = [...new Set(shots.map((m) => m.page))];
+          const needOcr = mapPages.filter((pg) => extractMapQuestions(f.pages![pg - 1] ?? "").length < 3).slice(0, 6);
+          let ocrText: Record<number, string> = {};
+          if (needOcr.length) {
+            try { ocrText = await ocrPages(f.file, needOcr, ctrl.signal, { subject: "social" }); }
+            catch { if (ctrl.signal.aborted) throw new Error("aborted"); }   // OCR unavailable: the text layer / the picture are still used below
+          }
           const seenPage = new Set<number>();
           shots.forEach((m, i) => {
             if (seenPage.has(m.page)) return;
             seenPage.add(m.page);
-            let qs = extractMapQuestions(f.pages![m.page - 1] ?? "");
+            const layer = f.pages![m.page - 1] ?? "";
+            const viaOcr = ocrText[m.page] ?? "";
+            let qs = extractMapQuestions(layer);
+            let pageText = layer;
+            if (qs.length < 3 && viaOcr) {
+              const q2 = extractMapQuestions(viaOcr);
+              if (q2.length > qs.length) qs = q2;
+              pageText = viaOcr;                                           // clean text for the AI notes, not the scrambled layer
+            }
             if (!qs.length && m.page < r.to) qs = extractMapQuestions(f.pages![m.page] ?? "");
-            // a map is kept even when its questions cannot be copied from the page (a Word exam whose text layer is scrambled, a scan the OCR read badly):
-            // the AI then writes the questions by LOOKING at the picture
-            const pageText = f.pages![m.page - 1] ?? "";
+            // a map is kept even when its questions cannot be copied from the page: the AI then writes the questions by LOOKING at the picture
             found.push({ id: `${f.id.slice(0, 6)}-p${m.page}-${i}`, fileId: f.id, page: m.page, dataUrl: m.dataUrl, questions: qs, hint: mapHint(pageText), ctx: pageText.slice(0, 3500) });
           });
           if (found.length >= 8) break;

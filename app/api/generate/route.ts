@@ -20,7 +20,7 @@ const DEADLINE_MS = 50_000; // stop talking to Gemini before Vercel kills the fu
 // and try them in order. Each model has its own free quota, so if one is busy / slow / over its limit the next one is used.
 const FIRST_OUTPUT_MS = 15_000; // a model that writes nothing for this long is skipped
 const modelCache = new Map<string, { at: number; list: string[] }>();
-async function pickModels(apiKey: string): Promise<string[]> {
+async function pickModels(apiKey: string, prefer: string | null = null, skip: string[] = []): Promise<string[]> {
   const pinned = process.env.GEMINI_MODEL ? [process.env.GEMINI_MODEL] : [];
   let found: string[] = [];
   const ck = createHash("sha256").update(apiKey).digest("hex").slice(0, 12);
@@ -40,8 +40,12 @@ async function pickModels(apiKey: string): Promise<string[]> {
     } catch {}
   }
   const fallback = ["gemini-flash-latest", "gemini-flash-lite-latest"];
-  const prefer = ["gemini-2.5-flash", "gemini-2.5-flash-lite"].filter((m) => !found.length || found.includes(m));
-  return [...new Set([...pinned, ...prefer, ...(found.length ? found : fallback)])].slice(0, 4);
+  // order: the model that last worked for THIS teacher (sent by the browser), the pinned one, then the usual suspects. The two "-latest" aliases are in the
+  // first four on purpose: before, they sat behind 2 slow models, never got a turn inside the time limit, and every request ended in "timeout".
+  const usual = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite", "gemini-flash-lite-latest"].filter((m) => !found.length || found.includes(m));
+  const all = [...new Set([...(prefer && (!found.length || found.includes(prefer)) ? [prefer] : []), ...pinned, ...usual, ...(found.length ? found : fallback)])];
+  const live = all.filter((m) => !skip.includes(m));            // models that stalled / were busy a moment ago are left out...
+  return (live.length ? live : all).slice(0, 4);                // ...unless that would leave nothing
 }
 const KINDS = ALL_KINDS;
 const LEVELS: Record<string, string> = {
@@ -175,7 +179,8 @@ function storyRule(age: number | null, stage: Stage | null, level: number | null
   Format: "text" = the TITLE on the first line (2-5 words, no full stop), then the story in 1-3 short paragraphs, each on its own line. The story must be complete (a real ending) and suit that age: animals, school, friends, family, nature, helping others, a small mystery. NO violence, romance, politics, religion, brands or real people.
   "choices" = the questions, each written "question ||| short answer" (the answer is at most one sentence). Mix who / what / where / when, why, one true-or-false question (the answer is True or False, the question starts with "True or false:") and, for ages 9+, one question about the meaning of a word from the story. Every answer is found IN the story, the questions follow the order of the story and none repeats another. "answer" = all the answers, one per line, in the same order. Everything is in English.`;
 }
-const MAP_RULE = `- map (أسئلة الخرائط): the picture sent with this request is a MAP cut from the book. It is printed on the exam right above these questions, so the student SEES it. Write short questions answered by LOOKING at the map: the name written at a number or letter, what is drawn at a sign of the legend, which sea / river / country / city lies north, south, east or west of another, the capital marked on it, what a colour means. Use ONLY names and signs that are clearly readable on the picture or written in the MAP NOTES. If you cannot read a label with certainty, do NOT ask about it. The book's own map questions in the MAP NOTES may be used, written in full. Each question says exactly what is asked and where to look (for example "ما اسم البحر الذي يحد الدولة المشار إليها بالرقم ٣ من الجهة الشمالية؟"), never "ما هذا؟". Never ask the student to draw, colour or mark on the map. choices = []. answer = the short exact answer. No two questions have the same answer.`;
+const MAP_RULE = `- map (أسئلة الخرائط): the picture sent with this request is a MAP cut from the book. It is printed on the exam right above these questions, so the student SEES it. Write short questions answered by LOOKING at the map: the name written at a number or letter, what is drawn at a sign of the legend, which sea / river / country / city lies north, south, east or west of another, the capital marked on it, what a colour means. Use ONLY names and signs that are clearly readable on the picture or written in the MAP NOTES. If you cannot read a label with certainty, do NOT ask about it. The book's own map questions in the MAP NOTES may be used, written in full. Each question says exactly what is asked and where to look (for example "ما اسم البحر الذي يحد الدولة المشار إليها بالرقم ٣ من الجهة الشمالية؟"), never "ما هذا؟". Never ask the student to draw, colour or mark on the map. choices = []. answer = the short exact answer. No two questions have the same answer.
+  LABEL STYLE (the usual Egyptian exam): when the MAP NOTES show dotted items such as "(١) خزان ......", "(٢) أحد روافد نهر النيل ......", "(٣) دولة قامت بها حضارة أكسوم ......", "(٤) دائرة عرض رئيسية ......", the numbers 1, 2, 3... are drawn ON the picture and the student writes what each one is. Write questions of exactly this kind: \"اكتب اسم (الخزان) الذي يشير إليه الرقم (١) على الخريطة.\" Look at the number on the picture, read the name written next to it (or decide what the sign is from the legend) and put it in answer. ONLY ask about a number you can see clearly and whose label or sign you can read with certainty; if you cannot, skip it. Never invent a number that is not on the picture.`;
 const LANG_KIND_RULES: Record<string, Record<string, string>> = {
   arabic: {
     mcq: "- mcq: for grammar and morphology the three wrong choices are the classic mistakes (another case ending, another part of speech, another form) and look like the right one. For vocabulary the choices are real Arabic words of the same type. Exactly one choice is correct under the rules the text teaches.",
@@ -315,9 +320,12 @@ export async function POST(req: Request) {
   if (!apiKey) return NextResponse.json({ code: "no_key", error: "لم تضف مفتاح Gemini الخاص بك بعد. اضغط زر «🔑 مفتاح الذكاء الاصطناعي» في الأعلى والصق مفتاحك المجاني." }, { status: 400 });
   const key: string = apiKey; // narrowed copy for the closures below
 
-  let body: { context?: string; want?: Record<string, number>; avoid?: string[]; difficulty?: string; topic?: string; subject?: string; stage?: string; level?: number; branch?: string; focus?: string[]; age?: number; maps?: Array<{ id?: string; dataUrl?: string; hint?: string }> };
+  let body: { context?: string; want?: Record<string, number>; avoid?: string[]; difficulty?: string; topic?: string; subject?: string; stage?: string; level?: number; branch?: string; focus?: string[]; age?: number; maps?: Array<{ id?: string; dataUrl?: string; hint?: string }>; prefer?: string; skip?: string[] };
   try { body = await req.json(); } catch { return NextResponse.json({ code: "bad_request", error: "طلب غير صالح" }, { status: 400 }); }
 
+  const MODEL_OK = /^gemini-[a-z0-9.\-]{2,50}$/;
+  const preferModel = typeof body.prefer === "string" && MODEL_OK.test(body.prefer) ? body.prefer : null;
+  const skipModels = (Array.isArray(body.skip) ? body.skip : []).map(String).filter((m) => MODEL_OK.test(m)).slice(0, 8);
   const isMath = body.subject === "math";
   const context = cleanText(body.context ?? "", isMath).slice(0, 9000);
   // how many questions of each type to write in this batch (small batches finish well inside the time limit)
@@ -372,6 +380,8 @@ ${context}
   const ctrl = new AbortController();
   req.signal.addEventListener("abort", () => ctrl.abort());
   let timedOut = false;
+  const t0 = Date.now();
+  const withImage = !!(mapPic && want.map);
   const deadline = setTimeout(() => { timedOut = true; ctrl.abort(); }, DEADLINE_MS);
 
   const call = (model: string, thinking: Record<string, unknown> | null, signal: AbortSignal) =>
@@ -399,7 +409,7 @@ ${context}
       const ext = new ObjectExtractor();
       let count = 0, buf = "";
       try {
-        const models = await pickModels(key);
+        const models = await pickModels(key, preferModel, skipModels);
         let lastErr: { code: string; error: string; retryAfter?: number } | null = null;
         let finished = false, dayHits = 0;
         for (let mi = 0; mi < models.length && !finished; mi++) {
@@ -407,8 +417,13 @@ ${context}
           const mctrl = new AbortController();
           const onAbort = () => mctrl.abort();
           ctrl.signal.addEventListener("abort", onAbort);
-          let stalled = false;
-          const stallTimer = setTimeout(() => { stalled = true; mctrl.abort(); }, FIRST_OUTPUT_MS);
+          let stalled = false, announced = false;
+          // patience per model: the first one gets the most (a picture makes the first token slower); the others share what is left of the 50 s,
+          // so the LAST model always still has time to answer (a flat 15 s x 4 models used up the whole budget before the 4th one started)
+          const remaining = DEADLINE_MS - (Date.now() - t0);
+          const base = withImage ? FIRST_OUTPUT_MS + 7_000 : FIRST_OUTPUT_MS + 1_000;
+          const patience = Math.max(7_000, Math.min(base, mi === 0 ? remaining * 0.45 : (remaining - 2_000) / (models.length - mi)));
+          const stallTimer = setTimeout(() => { stalled = true; mctrl.abort(); }, patience);
           try {
             let res: Response;
             let tIdx = thinkingByModel[model] ?? 0;
@@ -424,6 +439,7 @@ ${context}
               try { j = await res.json(); } catch {}
               console.error("gemini error", model, res.status, JSON.stringify(j).slice(0, 500));
               const e = classify(res.status, j);
+              if (e.code !== "bad_key") send({ t: "slow", model });   // busy / over its limit / retired: the browser skips it for a few minutes
               if (e.code === "rate_day") dayHits++; // each model has its own daily quota: only when EVERY model is out is the key really out
               if (!lastErr || lastErr.code === "error" || e.code !== "error") lastErr = e; // keep the most useful error
               // a bad key will fail on every model; anything else (busy, quota, retired model) -> try the next one
@@ -444,7 +460,7 @@ ${context}
                 let j: any;
                 try { j = JSON.parse(line.slice(5).trim()); } catch { continue; }
                 const piece = (j.candidates?.[0]?.content?.parts ?? []).filter((p: { thought?: boolean }) => !p.thought).map((p: { text?: string }) => p.text ?? "").join("");
-                if (piece) clearTimeout(stallTimer);
+                if (piece) { clearTimeout(stallTimer); if (!announced) { announced = true; send({ t: "model", model }); } }   // the browser remembers it and asks for it first next time
                 for (const obj of ext.push(piece)) {
                   let raw: Raw;
                   try { raw = JSON.parse(obj); } catch { continue; }
@@ -463,6 +479,7 @@ ${context}
             if (ctrl.signal.aborted) throw e; // the whole request was stopped or ran out of time
             if (count) { finished = true; break; } // keep what was written
             console.error("gemini stalled/failed", model, stalled ? "no output in time" : String(e));
+            send({ t: "slow", model });
             lastErr = { code: stalled ? "timeout" : "network", error: stalled ? "استغرق النموذج وقتًا طويلًا" : "تعذّر الاتصال بخدمة الذكاء الاصطناعي", retryAfter: 2 };
             if (last) break;
           } finally {

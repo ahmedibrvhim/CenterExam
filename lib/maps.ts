@@ -167,7 +167,65 @@ const Q_WORD = /^(?:حدد|اذكر|اكتب|عدد|عين|بين|وضح|است�
 const plain = (t: string) => t.normalize("NFKC").replace(/[ً-ٟـ]/g, "").replace(/[أإآ]/g, "ا").replace(/ى/g, "ي");
 const letters = (t: string) => (t.match(/\p{L}/gu) ?? []).length;
 
+// ---------------------------------------------------------------------------------------------------------------------------
+// LABEL-STYLE map questions (the usual Egyptian exam format):
+//     أمامك خريطة لحوض النيل، من خلالها أجب عما يأتي:
+//     (١) خزان ..................
+//     (٢) أحد روافد نهر النيل ..................
+//     (٣) دولة قامت بها حضارة أكسوم ..................
+// The numbers are drawn ON the map picture; the student writes what each number is. These items are short (no verb, no question mark),
+// so the generic reader below used to drop them and the AI was left to guess. They are turned into full questions here.
+// Works on OCR text too: OCR often misreads the digits ("(٢)" -> "(7)") and glues junk after the dots, so the number is taken from the ORDER
+// of the items, not from the digit that was read, and everything after the dotted line is thrown away.
+// ---------------------------------------------------------------------------------------------------------------------------
+const LEADER = /(?:\.{4,}|…{2,}|_{4,}|[.…_·]{5,})/;
+const NUM_BULLET = /^[\s\u200e\u200f\u202a-\u202e]*[()\[\]]?\s*[0-9٠-٩]{1,2}\s*[()\[\].\-–]/;
+const NUM_BULLET_OCR = /^[\s\u200e\u200f\u202a-\u202e]*[()\[\]]\s*[^\p{L}\s]{1,2}\s*[()\[\]]/u;         // \"(”)\"  \")9(\"  : a bracketed junk character that OCR read instead of a digit
+const LETTER_BULLET = /^[\s\u200e\u200f\u202a-\u202e]*[()]?\s*[أ-ي]\s*[()\-–.]/;                           // \"(ب)\" : the next part of the exam starts: the map block is over
+function labelDesc(line: string): string {
+  let t = line.replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, "");
+  const m = t.search(LEADER);
+  if (m >= 0) t = t.slice(0, m);
+  t = t.replace(/^[^\p{L}]+/u, "");                                   // the bullet, whatever way it was read
+  t = t.replace(/\s[0-9٠-٩>|<~=\-–_]+(?:\s.*)?$/u, "");               // junk glued after the words ("أكسوم 0 1 > جحي")
+  return t.replace(/[\s:：،,;؛]+$/u, "").replace(/\s+/g, " ").trim();
+}
+const ASK_WORDS = new Set(["ما", "ماذا", "من", "اين", "كم", "اذكر", "اكتب", "حدد", "عدد", "عين", "بين", "وضح", "هل", "كيف", "لماذا", "ضع", "صف", "استخرج"]);
+export function extractLabelQuestions(text: string): string[] {
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (!hasMapWord(l) || !(/[:：]/.test(l) || /(?:اجب|أجب)/.test(plain(l)) || /^[\s\d()٠-٩]*(?:ادرس|لاحظ|تامل|تأمل|انظر|بالرجوع|بالاعتماد|بالاستعانة)/.test(plain(l)))) continue;
+    const items: Array<{ d: string; leader: boolean }> = [];
+    for (let j = i + 1, miss = 0; j < lines.length && items.length < 8; j++) {
+      const raw = lines[j];
+      if (!raw.trim()) continue;
+      const leader = LEADER.test(raw);
+      if (LETTER_BULLET.test(raw) && !leader) break;                                // "(ب) اكتب ما تشير ..." ends the block
+      const isItem = leader || NUM_BULLET.test(raw) || NUM_BULLET_OCR.test(raw);
+      const d = isItem ? labelDesc(raw) : "";
+      // a label is a SHORT noun phrase: no brackets left inside it, no full stop, not a sentence, not a question
+      const ok = isItem && letters(d) >= 3 && d.length <= 45 && d.split(" ").length <= 7 && !/[()\[\]]/.test(d) && !/[.؟?]$/.test(d) && !ASK_WORDS.has(plain(d).split(" ")[0] ?? "");
+      if (!ok) { if (isItem && items.length >= 2) break; if (++miss > 1) break; continue; }   // one noise line (text read from inside the picture) is tolerated
+      miss = 0;
+      items.push({ d, leader });
+    }
+    // a real label list has dotted lines for the answers: without them a numbered list is ordinary questions (the generic reader below takes those)
+    const withLeader = items.filter((x) => x.leader).length;
+    if (items.length < 2 || withLeader < 2 || withLeader * 2 < items.length) continue;
+    const out: string[] = [];
+    items.forEach(({ d }, k) => {
+      const q = `اكتب اسم (${/^\S+$/.test(d) && !/^ال/.test(d) ? "ال" + d : d}) الذي يشير إليه الرقم (${k + 1}) على الخريطة.`;
+      if (!out.includes(q)) out.push(q);
+    });
+    return out;                                                                     // the first map block of the page is enough
+  }
+  return [];
+}
+
 export function extractMapQuestions(text: string): string[] {
+  const label = extractLabelQuestions(text);
+  if (label.length) return label;                      // the book gave a label list: those ARE the map questions (the generic reader would only add noise)
   const lines = text.split("\n").map((l) => l.replace(/\s+/g, " ").trim()).filter((l) => letters(l) >= 2 && !/^[0-9٠-٩\s.\-–]+$/.test(l));
   // lines -> items: a numbered line starts a new item; other lines continue the item above until it ends with . ؟ ? : !
   const items: Array<{ t: string; bullet: boolean }> = [];
