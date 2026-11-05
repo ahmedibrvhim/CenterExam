@@ -120,9 +120,24 @@ export function findGraphicRegions(img: Pix, opt: { minAreaPct?: number } = {}):
     return out;
   });
 
-  const minArea = pageArea * ((opt.minAreaPct ?? 5) / 100);
+  // a block of TEXT (or dotted answer lines) can also form one big shape: it has empty bands between its lines and little ink,
+  // a map / photo is inked all the way down. Such a box is dropped.
+  const looksLikeText = (g: Box): boolean => {
+    const x0 = Math.max(0, g.x), y0 = Math.max(0, g.y), x1 = Math.min(W, g.x + g.w), y1 = Math.min(H, g.y + g.h);
+    if (x1 - x0 < 1 || y1 - y0 < 1) return false;
+    let ink = 0, blank = 0;
+    for (let y = y0; y < y1; y++) {
+      let row = 0;
+      for (let x = x0; x < x1; x++) if (mask[y * W + x]) { row++; }
+      ink += row; if (row === 0) blank++;
+    }
+    const rows = y1 - y0, area = (x1 - x0) * rows;
+    return blank / rows > 0.18 && ink / area < 0.3;
+  };
+
+  const minArea = pageArea * ((opt.minAreaPct ?? 2.5) / 100);   // a map photo printed small (about 4% of the page) must still be found
   return groups
-    .filter((g) => g.w * g.h >= minArea && g.w >= W * 0.2 && g.h >= H * 0.08)
+    .filter((g) => g.w * g.h >= minArea && g.w >= W * 0.2 && g.h >= H * 0.08 && !looksLikeText(g))
     .sort((a, b) => b.w * b.h - a.w * a.h);
 }
 

@@ -1,6 +1,6 @@
 // Browser part of the map reader: renders a PDF page, asks lib/maps.ts where the map is, and cuts it out as a picture.
 // Nothing is uploaded: the picture stays in the browser until the exam is made (and it is sent to the AI only for map questions).
-import { findGraphicRegions } from "@/lib/maps";
+import { findGraphicRegions, type Box } from "@/lib/maps";
 
 export type MapShot = { page: number; dataUrl: string; w: number; h: number };
 
@@ -13,7 +13,31 @@ async function openPdf(file: File) {
   // @ts-ignore - pdfjs-dist 3.x ships without usable types for this path
   const pdfjs: any = await import("pdfjs-dist/build/pdf");
   pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.js", import.meta.url).toString();
-  return pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+  return { pdfjs, doc: await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise };
+}
+
+// The pictures that are really placed on the page (a map pasted into a Word exam is one of them): their exact boxes, in pixels of a
+// page rendered FIND_W wide. A scan of the whole page (one picture that covers it) and tiny pictures (logos, bullets) are ignored.
+async function imageBoxes(pdfjs: any, page: any, viewport: any): Promise<Box[]> {
+  const OPS = pdfjs.OPS, U = pdfjs.Util;
+  const ops = await page.getOperatorList();
+  let ctm = [1, 0, 0, 1, 0, 0]; const stack: number[][] = []; const out: Box[] = [];
+  for (let i = 0; i < ops.fnArray.length; i++) {
+    const fn = ops.fnArray[i], a = ops.argsArray[i];
+    if (fn === OPS.save) stack.push(ctm.slice());
+    else if (fn === OPS.restore) ctm = stack.pop() || [1, 0, 0, 1, 0, 0];
+    else if (fn === OPS.transform) ctm = U.transform(ctm, a);
+    else if (fn === OPS.paintImageXObject || fn === OPS.paintInlineImageXObject || fn === OPS.paintJpegXObject || fn === OPS.paintImageXObjectRepeat) {
+      const m = U.transform(viewport.transform, ctm);
+      const xs = [m[4], m[0] + m[4], m[2] + m[4], m[0] + m[2] + m[4]], ys = [m[5], m[1] + m[5], m[3] + m[5], m[1] + m[3] + m[5]];
+      const x = Math.min(...xs), y = Math.min(...ys);
+      out.push({ x: Math.round(x), y: Math.round(y), w: Math.round(Math.max(...xs) - x), h: Math.round(Math.max(...ys) - y) });
+    }
+  }
+  const W = viewport.width, H = viewport.height;
+  return out
+    .filter((b) => b.w >= W * 0.15 && b.h >= H * 0.07 && b.w * b.h < W * H * 0.7)
+    .sort((a, b) => b.w * b.h - a.w * a.h);
 }
 
 async function renderWidth(doc: any, n: number, width: number): Promise<HTMLCanvasElement> {
@@ -32,7 +56,7 @@ async function renderWidth(doc: any, n: number, width: number): Promise<HTMLCanv
 // pages = 1-based page numbers worth searching (the caller only passes pages whose text talks about a map)
 export async function scanMaps(file: File, pages: number[], signal: AbortSignal): Promise<MapShot[]> {
   if (!pages.length) return [];
-  const doc = await openPdf(file);
+  const { pdfjs, doc } = await openPdf(file);
   const out: MapShot[] = [];
   try {
     for (const n of pages) {
@@ -41,7 +65,10 @@ export async function scanMaps(file: File, pages: number[], signal: AbortSignal)
       try {
         small = await renderWidth(doc, n, FIND_W);
         const px = small.getContext("2d")!.getImageData(0, 0, small.width, small.height);
-        const regions = findGraphicRegions({ data: px.data, width: small.width, height: small.height }).slice(0, MAX_PER_PAGE);
+        let regions: Box[] = [];
+        try { const pg = await doc.getPage(n); regions = await imageBoxes(pdfjs, pg, pg.getViewport({ scale: small.width / pg.getViewport({ scale: 1 }).width })); } catch {}
+        if (!regions.length) regions = findGraphicRegions({ data: px.data, width: small.width, height: small.height });
+        regions = regions.slice(0, MAX_PER_PAGE);
         if (!regions.length) continue;
         const big = await renderWidth(doc, n, CUT_W);
         const k = big.width / small.width;

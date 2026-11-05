@@ -14,14 +14,14 @@ import { listExams, removeExam, saveExam } from "@/lib/db";
 import { isTrial } from "@/lib/plans";
 import { Fail, streamBatch } from "@/lib/ai";
 import { detectFromRanges } from "@/lib/detect";
-import { extractMapQuestions, hasMapWord } from "@/lib/maps";
+import { extractMapQuestions, hasMapWord, mapHint } from "@/lib/maps";
 import { scanMaps } from "@/lib/mapscan";
 import { extractSignals, type Signals } from "@/lib/analyze";
 import { ALL_KINDS, BRANCH_LABEL, GROUP_LABEL, GROUP_ORDER, STAGE_LABEL, defaultCounts, getSubject, gradeName, kindStatus, zeroCounts, zeroTexts, type Avail, type Branch, type Kind, type Stage, type SubjectId } from "@/lib/subjects";
 import { Limit, fmtDuration, getKeyId, getLimit, getUsage, isKeySeen, markKeySeen, msUntilPacificMidnight, recordRequest, saveLimit, setKeyId } from "@/lib/limits";
 
 // a map cut out of a page of the book (social studies): printed on the exam above the "map" questions
-type MapItem = { id: string; fileId: string; page: number; dataUrl: string; questions: string[] }; // questions = the book's own questions about this map, copied from the page
+type MapItem = { id: string; fileId: string; page: number; dataUrl: string; questions: string[]; hint?: string; ctx?: string }; // questions = the book's own questions about this map, copied from the page
 type SrcFile = { id: string; name: string; size: number; file: File; pages?: string[]; progress?: [number, number] };
 type ToastState = { msg: string; kind: "success" | "error" | "info" } | null;
 
@@ -336,7 +336,10 @@ export default function Home() {
             seenPage.add(m.page);
             let qs = extractMapQuestions(f.pages![m.page - 1] ?? "");
             if (!qs.length && m.page < r.to) qs = extractMapQuestions(f.pages![m.page] ?? "");
-            if (qs.length) found.push({ id: `${f.id.slice(0, 6)}-p${m.page}-${i}`, fileId: f.id, page: m.page, dataUrl: m.dataUrl, questions: qs });
+            // a map is kept even when its questions cannot be copied from the page (a Word exam whose text layer is scrambled, a scan the OCR read badly):
+            // the AI then writes the questions by LOOKING at the picture
+            const pageText = f.pages![m.page - 1] ?? "";
+            found.push({ id: `${f.id.slice(0, 6)}-p${m.page}-${i}`, fileId: f.id, page: m.page, dataUrl: m.dataUrl, questions: qs, hint: mapHint(pageText), ctx: pageText.slice(0, 3500) });
           });
           if (found.length >= 8) break;
         }
@@ -349,7 +352,7 @@ export default function Home() {
   const avail: Avail | null = (() => {
     const a = detected?.avail ?? null;
     if (!a || !isSocial) return a;
-    const nq = maps.reduce((n, m) => n + m.questions.length, 0);   // map questions are copied from the book: there are as many as the book has
+    const nq = maps.reduce((n, m) => n + (m.questions.length || 3), 0);   // copied from the book when it has them, otherwise the AI writes a few from the picture
     return { ...a, map: { ok: nq > 0, n: nq, suggest: Math.min(6, nq), why: mapBusy ? "جارٍ البحث عن الخرائط في صفحات الكتاب…" : "لم يُعثر على خريطة مع أسئلتها في الصفحات المحددة" } };
   })();
   const fileKey = selected.join(",");
@@ -486,12 +489,24 @@ export default function Home() {
     let end: { phase: Gen["phase"]; message?: string } = { phase: "done" };
     let passStart = 0;
     let lastReq = 0; // free Gemini allows only ~5 requests/minute on 2.5-flash: keep ~12.5s between requests so we do not hit the per-minute limit
-    // ---- map questions: NO AI. The map picture and the book's own questions about it were cut out of the PDF (lib/maps.ts); they go on the exam as they are. ----
+    // ---- map questions: the book's own questions about the map are copied as they are; only when it has none (or too few) the AI writes them from the picture. ----
     let mapNote = "", stopAll = false;
     if (quota.map > 0 && maps.length) {
       const pool = maps.flatMap((m) => m.questions.map((t) => ({ id: m.id, t })));
-      if (pool.length < quota.map) { mapNote = `في الكتاب ${pool.length} سؤال خريطة فقط (المطلوب ${quota.map})`; quota.map = pool.length; }
       for (const it of pool) { if (have.map >= quota.map) break; push({ kind: "map", text: it.t, choices: [], answer: "", mapId: it.id }); }
+      // the book had fewer map questions than wanted (or none that could be read): the AI writes the rest by looking at the map picture
+      for (const m of maps) {
+        const need = quota.map - have.map;
+        if (need <= 0 || ctrl.signal.aborted) break;
+        if (m.questions.length >= 3 || (m.ctx ?? "").trim().length < 200) continue;
+        try {
+          const wait = lastReq + 12500 - Date.now(); if (lastReq && wait > 0) await sleep(wait, ctrl.signal);
+          lastReq = Date.now();
+          { const n = recordRequest(); setUsage((u) => (shared ? u + 1 : n)); }
+          await streamBatch({ context: m.ctx, want: { map: Math.min(3, need) }, avoid: got.slice(-40).map((q) => q.text), difficulty, topic: topic.trim(), subject: subject?.id, stage, level, branch, focus, age, maps: [{ id: m.id, dataUrl: m.dataUrl, hint: m.hint ?? "" }] }, ctrl.signal, push);
+        } catch { if (ctrl.signal.aborted) { stopAll = true; break; } }
+      }
+      if (have.map < quota.map) { mapNote = `تم الحصول على ${have.map} سؤال خريطة فقط (المطلوب ${quota.map})`; quota.map = have.map; }
     } else quota.map = 0;
     let consecutive = 0; // groups of the book in a row that failed because the AI was busy: after 3 the run stops and keeps what it has
     outer: for (let i = 0; i < groups.length * 4 && missing() > 0 && !stopAll; i++) {
@@ -942,7 +957,7 @@ export default function Home() {
                         {subject.kinds.filter((kd) => !kindStatus(kd, stage, level, avail).ok).map((kd) => <span key={kd.id} className="tag">{kd.label}</span>)}
                         {subject.kinds.every((kd) => kindStatus(kd, stage, level, avail).ok) && <span className="hint" style={{ margin: 0 }}>لا يوجد</span>}
                       </div>
-                      {isSocial && <div className="smart-row"><span>الخرائط</span>{mapBusy ? <span className="tag"><span className="spinner" /> جارٍ البحث عن الخرائط…</span> : maps.length ? maps.map((m) => <span key={m.id} className="tag on" title="خريطة قُصّت من صفحة الكتاب مع أسئلتها، وستُطبع في الاختبار كما هي">🗺️ ص {m.page} · {m.questions.length} سؤال</span>) : <span className="hint" style={{ margin: 0 }}>لا توجد خرائط في الصفحات المحددة</span>}</div>}
+                      {isSocial && <div className="smart-row"><span>الخرائط</span>{mapBusy ? <span className="tag"><span className="spinner" /> جارٍ البحث عن الخرائط…</span> : maps.length ? maps.map((m) => <span key={m.id} className="tag on" title="خريطة قُصّت من صفحة الكتاب مع أسئلتها، وستُطبع في الاختبار كما هي">🗺️ ص {m.page} · {m.questions.length ? `${m.questions.length} سؤال` : "أسئلة من الخريطة"}</span>) : <span className="hint" style={{ margin: 0 }}>لا توجد خرائط في الصفحات المحددة</span>}</div>}
                       {subject.id === "english" && age && <div className="smart-row"><span>سنّ القارئ</span><span className="tag" title="تُكتب القصة بهذا المستوى (من الصف الموجود في الكتاب، أو من صعوبة النص)">{age} سنة تقريبًا{gradeName(stage, level) ? ` · ${gradeName(stage, level)}` : " · من مستوى النص"}</span></div>}
                       {suggestTotal > 0 && <button type="button" className="btn-ghost" onClick={applySuggestion}>⚡ تطبيق الأعداد المقترحة ({suggestTotal} سؤال في النسخة)</button>}
                     </div>
