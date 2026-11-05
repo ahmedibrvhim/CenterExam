@@ -129,8 +129,9 @@ export default function Home() {
   // page range of every chosen file (typed text). The file analysis of the science tool needs it and waits until typing pauses.
   const [ranges, setRanges] = useState<Record<string, { from: string; to: string }>>({});
   const [dRanges, setDRanges] = useState(ranges);
-  useEffect(() => { const t = setTimeout(() => setDRanges(ranges), 700); return () => clearTimeout(t); }, [ranges]);
-  const settled = ranges === dRanges;
+  useEffect(() => { if (sameRanges(ranges, dRanges)) return; const t = setTimeout(() => setDRanges(ranges), 700); return () => clearTimeout(t); }, [ranges]); // eslint-disable-line react-hooks/exhaustive-deps
+  const sameRanges = (a: typeof ranges, b: typeof ranges) => JSON.stringify(a) === JSON.stringify(b);
+  const settled = sameRanges(ranges, dRanges);   // compared by VALUE: a re-written but identical range must not close the analysis
 
   const notify = (msg: string, kind: "success" | "error" | "info" = "info") => {
     setToast({ msg, kind });
@@ -259,7 +260,8 @@ export default function Home() {
     const x = clamp(a || 1, 1, max), y = clamp(b || n, 1, max);
     if (a && b && a > b) notify(`الرقمان معكوسان — تم التبديل: من ${y} إلى ${x}`, "info");
     else if ((a && a > max) || (b && b > max)) notify(`الكتاب فيه ${n} صفحة فقط — تم التعديل`, "info");
-    setRanges((p) => ({ ...p, [f.id]: { from: a ? String(Math.min(x, y)) : "", to: b ? String(Math.max(x, y)) : "" } }));
+    const nf = a ? String(Math.min(x, y)) : "", nt = b ? String(Math.max(x, y)) : "";
+    setRanges((p) => (p[f.id]?.from === nf && p[f.id]?.to === nt ? p : { ...p, [f.id]: { from: nf, to: nt } })); // nothing changed -> keep the same object (no re-analysis)
   };
   const needRange = !!subject?.ready;   // science: the analysis and the question types wait for the page numbers
   const rangesOk = !needRange || (chosen.length > 0 && chosen.every((f) => f.pages && rangeOf(f, dRanges).typed));
@@ -334,10 +336,20 @@ export default function Home() {
   const age: number | null = detected?.age ?? null;       // reading age of the pupils (the story is written for it)
   const isSocial = subject?.id === "social";
   // ---------- maps: search the pictures of the chosen pages (only pages whose text talks about a map) ----------
+  // The search (it renders the book's pages: heavy on a phone) runs ONCE per set of pages. It is not restarted, and the maps found are not
+  // thrown away, when the analysis only flickers (that restart was the "everything reloads when I tap a box" bug of this subject).
+  const mapKeyRef = useRef(""), mapCtrlRef = useRef<AbortController | null>(null), liveKeyRef = useRef("");
+  liveKeyRef.current = `${subject?.id}|${readyKey}`;
+  useEffect(() => () => { mapCtrlRef.current?.abort(); }, []);
   useEffect(() => {
-    setMaps([]);
-    if (!isSocial || !analysisReady || !detected) return;
+    if (!isSocial) { if (mapKeyRef.current) { mapKeyRef.current = ""; mapCtrlRef.current?.abort(); setMaps([]); setMapBusy(false); } return; }
+    if (!analysisReady || !detected) return;                     // keep what we have while the analysis is not ready
+    const key = liveKeyRef.current;
+    if (mapKeyRef.current === key) return;                       // same pages: the search already ran (or is running)
+    mapCtrlRef.current?.abort();
+    mapKeyRef.current = key; setMaps([]);
     const ctrl = new AbortController();
+    mapCtrlRef.current = ctrl;
     (async () => {
       setMapBusy(true);
       const found: MapItem[] = [];
@@ -347,7 +359,7 @@ export default function Home() {
           const pgs: number[] = [];
           for (let p = r.from; p <= r.to; p++) if (hasMapWord(f.pages![p - 1] ?? "")) pgs.push(p);
           if (!pgs.length) continue;
-          const shots = await scanMaps(f.file, pgs.slice(0, 40), ctrl.signal);
+          const shots = await scanMaps(f.file, pgs.slice(0, 20), ctrl.signal);
           // the questions printed on the same page belong to the first (largest) map of the page; when the page has none, the next page may carry them
           const seenPage = new Set<number>();
           shots.forEach((m, i) => {
@@ -365,7 +377,7 @@ export default function Home() {
         if (!ctrl.signal.aborted) setMaps(found.slice(0, 8));
       } catch {} finally { if (!ctrl.signal.aborted) setMapBusy(false); }
     })();
-    return () => { ctrl.abort(); setMapBusy(false); };
+    return () => { if (liveKeyRef.current !== key) { ctrl.abort(); setMapBusy(false); if (mapKeyRef.current === key) mapKeyRef.current = ""; } };   // only a CHANGE of pages / subject stops the search
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readyKey, subject?.id, analysisReady]);
   const avail: Avail | null = (() => {
@@ -477,18 +489,19 @@ export default function Home() {
       abortRef.current = null; setGen(null);
       notify("لم أجد نصًا كافيًا في الصفحات المحددة", "error"); return;
     }
-    const picked = pickChunks(all, topic, clamp(Math.ceil(count / 2), 2, 40));
+    const textTotal0 = ALL_KINDS.reduce((n, k) => (k === "map" ? n : n + perType[k] * versions), 0);
+    const picked = pickChunks(all, topic, clamp(Math.ceil(textTotal0 / 6) * 2, 2, 40));   // 2 parts of the book per request keep the prompt small and fast
     if (!picked.length) { notify(`لم أجد الموضوع «${topic}» في الصفحات المحددة`, "error"); return; }
     // ONE plan for every subject (science, math, arabic, social, english): about 6 questions per request, so the free limit is not wasted.
     // The picked parts of the book are split evenly between the requests (social studies used to end up in a single request).
-    const BATCH_MAX = 6;
+    let BATCH_MAX = 6;                                               // shrinks for the rest of the run when the AI is slow / busy (see below)
     const textTotal = ALL_KINDS.reduce((n, k) => (k === "map" ? n : n + perType[k] * versions), 0);
-    const nb = clamp(Math.ceil(textTotal / BATCH_MAX), 1, picked.length);
+    const nb = clamp(Math.ceil(textTotal / 6), 1, picked.length);
     const groups: Chunk[][] = [];
     for (let i = 0; i < nb; i++) groups.push(picked.slice(Math.floor((i * picked.length) / nb), Math.floor(((i + 1) * picked.length) / nb)));
-    const batchTotal = Math.max(groups.length, Math.ceil(textTotal / BATCH_MAX));
+    const batchTotal = Math.max(groups.length, Math.ceil(textTotal / 6));
     let started = 0, used = 0;                                       // started = batches shown on screen, used = requests really sent
-    const budget = batchTotal * 2 + 2;                               // hard cap on requests (retries included): the same for every subject
+    const budget = batchTotal * 2 + 4;                               // hard cap on requests (retries included): the same for every subject
 
     // Every copy of the exam gets its OWN questions, so the AI must write (questions per copy) x (number of copies) of each type.
     const quota = zero(), have = zero();
@@ -585,13 +598,14 @@ export default function Home() {
           end = { phase: "partial", message: `انتهى الحد اليومي المجاني للذكاء الاصطناعي. يتجدد بعد ${fmtDuration(l.until - Date.now())} تقريبًا.` };
           break outer;
         }
+        if (fail.code === "busy" || fail.code === "timeout") BATCH_MAX = Math.max(3, BATCH_MAX - 1);   // slow AI -> ask for fewer questions per request from now on
         if ((fail.code === "rate_minute" || fail.code === "busy" || fail.code === "timeout") && attempt >= 2) {
           // this part of the book keeps failing: leave it and try the NEXT part (the AI is often busy only for a minute or two)
           if (++consecutive >= 3) { end = { phase: "partial", message: `${fail.message} — توقفنا بعد عدة محاولات فاشلة، وتم الاحتفاظ بما كُتب` }; break outer; }
           break;
         }
         if ((fail.code === "rate_minute" || fail.code === "busy" || fail.code === "timeout") && attempt < 2) {
-          const secs = clamp((fail.retryAfter ?? 20) * (attempt + 1), 5, 90);
+          const secs = clamp(Math.max(fail.retryAfter ?? 20, fail.code === "rate_minute" ? 0 : 6) * (attempt + 1), 5, 90);
           setLimit({ kind: fail.code === "busy" || fail.code === "timeout" ? "busy" : "minute", until: Date.now() + secs * 1000, why: `${fail.code}: ${fail.message}` });
           try { await sleep(secs * 1000, ctrl.signal); } catch { end = { phase: "stopped" }; setLimit(getLimit()); break outer; }
           setLimit(getLimit());

@@ -18,7 +18,7 @@ const DEADLINE_MS = 50_000; // stop talking to Gemini before Vercel kills the fu
 // "gemini-flash-latest" always points to the current free Flash model. Override with GEMINI_MODEL if needed.
 // Model names change over time (old ones get retired -> 404). So we ask Google which Flash models this key can use,
 // and try them in order. Each model has its own free quota, so if one is busy / slow / over its limit the next one is used.
-const FIRST_OUTPUT_MS = 18_000; // a model that writes nothing for this long is skipped
+const FIRST_OUTPUT_MS = 15_000; // a model that writes nothing for this long is skipped
 const modelCache = new Map<string, { at: number; list: string[] }>();
 async function pickModels(apiKey: string): Promise<string[]> {
   const pinned = process.env.GEMINI_MODEL ? [process.env.GEMINI_MODEL] : [];
@@ -319,7 +319,7 @@ export async function POST(req: Request) {
   try { body = await req.json(); } catch { return NextResponse.json({ code: "bad_request", error: "طلب غير صالح" }, { status: 400 }); }
 
   const isMath = body.subject === "math";
-  const context = cleanText(body.context ?? "", isMath).slice(0, 12000);
+  const context = cleanText(body.context ?? "", isMath).slice(0, 9000);
   // how many questions of each type to write in this batch (small batches finish well inside the time limit)
   const want: Record<string, number> = {};
   let n = 0;
