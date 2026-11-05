@@ -69,16 +69,17 @@ export default function Header({ subject, onChangeSubject }: { subject?: Subject
       </header>
       {/* bar 2 (scrolls away): where I am + how to go back, and the subscription */}
       <nav className="hdr-sub" aria-label="التنقل">
-        <div className="hdr-sub-in">
-          {s && onChangeSubject ? (
-            <div className="hdr-nav">
-              <button type="button" className="back-btn" onClick={onChangeSubject} aria-label="الرجوع إلى كل المواد">→ كل المواد</button>
-              <span className="subject-now" aria-label={`المادة الحالية ${s.name}`}><span aria-hidden="true">{s.icon}</span><span className="sn-txt">{s.name}</span></span>
-            </div>
-          ) : <span />}
+        {/* the page is RTL, so the first child sits on the right: 1) subscription  2) subject  3) back */}
+        <div className="hdr-sub-in" dir="rtl">
           <button type="button" className={`sub-status ${sub.cls}`} onClick={() => openPlans(null, "details")} title={detail} aria-label={`حالة الاشتراك: ${sub.text} — اضغط لعرض التفاصيل`}>
-            <span className="sub-dot" aria-hidden="true" /><span className="sub-txt">{sub.text}</span>
+            <span className="sub-dot" aria-hidden="true" /><span className="sub-txt" dir="rtl">{sub.text}</span>
           </button>
+          {s && onChangeSubject && (
+            <>
+              <span className="subject-now" aria-label={`المادة الحالية ${s.name}`}><span className="sn-ico" aria-hidden="true">{s.icon}</span><span className="sn-txt" dir="rtl">{s.name}</span></span>
+              <button type="button" className="back-btn" onClick={onChangeSubject} aria-label="الرجوع إلى كل المواد"><span className="back-arrow" aria-hidden="true">→</span><span>كل المواد</span></button>
+            </>
+          )}
         </div>
       </nav>
     </>

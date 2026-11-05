@@ -827,3 +827,17 @@ button.plan-card { cursor: pointer; font: inherit; color: inherit; transition: b
   .back-btn { padding: 4px 12px; }
   .hdr-sub .sub-status { max-width: 50%; }
 }
+
+/* ---- navbar v4: sub bar reads right → left: 1) subscription  2) subject  3) back button ---- */
+.hdr-sub-in { direction: rtl; justify-content: flex-start; gap: 10px; }
+.hdr-sub .sub-status { order: 1; flex: 0 1 auto; max-width: 48%; margin-inline-start: 0; }
+.hdr-sub .subject-now { order: 2; flex: 1 1 auto; min-width: 0; padding-inline-start: 0; border-inline-start: 0; justify-content: flex-start; gap: 8px; unicode-bidi: isolate; }
+.hdr-sub .subject-now .sn-ico { flex: 0 0 auto; font-size: 18px; line-height: 1; font-family: "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",var(--font),sans-serif; }
+.hdr-sub .subject-now .sn-txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.hdr-sub .back-btn { order: 3; flex: 0 0 auto; margin-inline-start: auto; unicode-bidi: isolate; }
+.hdr-sub .sub-txt { unicode-bidi: isolate; }
+@media (max-width: 700px) {
+  .hdr-sub-in { gap: 8px; }
+  .hdr-sub .sub-status { max-width: 44%; }
+  .hdr-sub .subject-now { gap: 6px; }
+}
