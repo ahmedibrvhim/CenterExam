@@ -863,13 +863,18 @@ async function buildPdf(d: Document): Promise<Blob> {
   if (!sheets.length) throw new Error("no sheets");
   const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4", compress: true });
   const restore = d.defaultView ? mergeRangeRects(d.defaultView) : () => {};
+  // html2canvas does NOT draw from this frame: it copies the sheet into a NEW hidden frame and measures the words there. The one-rectangle-per-word fix
+  // must be installed in that copy too (onclone), otherwise a word that the browser reports in several pieces is drawn letter by letter ("ش ا م ل").
+  const cloneRestores: Array<() => void> = [];
+  const onclone = (cd: Document) => { try { if (cd.defaultView) cloneRestores.push(mergeRangeRects(cd.defaultView)); } catch {} };
   try {
     for (let i = 0; i < sheets.length; i++) {
       const el = sheets[i];
       const canvas = await html2canvas(el, {
         scale: IS_MOBILE ? 2 : 3, backgroundColor: "#ffffff", useCORS: true, logging: false,
-        windowWidth: el.offsetWidth, windowHeight: el.offsetHeight,
+        windowWidth: el.offsetWidth, windowHeight: el.offsetHeight, onclone,
       });
+      while (cloneRestores.length) { try { cloneRestores.pop()!(); } catch {} }
       if (i) pdf.addPage("a4", "portrait");
       pdf.addImage(canvas.toDataURL("image/jpeg", 0.93), "JPEG", 0, 0, SHEET_W, SHEET_H);
       canvas.width = canvas.height = 0; // free the memory before the next sheet

@@ -46,6 +46,24 @@ const MAX_OCR_PAGES = 400; // scanned pages read per exam (local OCR: no quota, 
 
 const fmtSize = (b: number) => (b < 1048576 ? `${Math.max(1, Math.round(b / 1024))} KB` : `${(b / 1048576).toFixed(1)} MB`);
 const stripPdf = (n: string) => n.replace(/\.pdf$/i, "");
+// Several copies + several maps: copy A gets the questions of the first map, copy B those of the second, and so on (with more maps than copies a copy
+// takes every Nth map). With ONE map every copy prints the same picture but gets DIFFERENT questions. dealSets deals the map questions in order,
+// position i -> copy i % versions, so they are put in that order here.
+function spreadMaps(pool: Q[], versions: number): Q[] {
+  const mq = pool.filter((q) => q.kind === "map");
+  const ids = [...new Set(mq.map((q) => q.mapId ?? ""))];
+  if (mq.length < 2 || versions < 2 || ids.length < 2) return pool;
+  const queue = new Map(ids.map((id) => [id, mq.filter((q) => (q.mapId ?? "") === id)]));
+  const mine = (c: number) => (ids.length >= versions ? ids.filter((_, j) => j % versions === c) : [ids[c % ids.length]]);
+  const out: Q[] = [];
+  for (let i = 0; i < mq.length; i++) {
+    const c = i % versions;
+    const from = [...mine(c), ...ids].find((id) => (queue.get(id) ?? []).length > 0);   // the copy's own map first; any map that still has questions when it runs out
+    if (from !== undefined) out.push(queue.get(from)!.shift()!);
+  }
+  return [...pool.filter((q) => q.kind !== "map"), ...out];
+}
+
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 // Arabic-Indic (٠-٩) and Persian (۰-۹) digits -> 0-9, so typing ٢١ works like 21
 const toLatin = (s: string) => s.replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660)).replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0));
@@ -365,9 +383,6 @@ export default function Home() {
   const perVersion = ALL_KINDS.reduce((n, k) => n + perType[k], 0); // questions on one copy
   const count = perVersion * versions;                        // questions the AI must write in total: every copy has its own questions
   const canGenerate = ready && perVersion > 0 && !running && !draft && !scan && analysisReady;
-  const suggestion = (() => { const o = zero(); if (subject && avail) for (const kd of subject.kinds) if (kindStatus(kd, stage, level, avail).ok) o[kd.id] = avail[kd.id]?.suggest ?? 0; return o; })();
-  const suggestTotal = ALL_KINDS.reduce((n, k) => n + suggestion[k], 0);
-  const applySuggestion = () => { touchedCounts.current = true; const t = zeroText(); for (const k of activeKinds) t[k] = String(suggestion[k]); setCountText(t); };
 
   const chooseSubject = (id: SubjectId) => {
     if (!can(id)) return;
@@ -492,14 +507,18 @@ export default function Home() {
     // ---- map questions: the book's own questions about the map are copied as they are; only when it has none (or too few) the AI writes them from the picture. ----
     let mapNote = "", stopAll = false;
     if (quota.map > 0 && maps.length) {
-      const pool = maps.flatMap((m) => m.questions.map((t) => ({ id: m.id, t })));
-      for (const it of pool) { if (have.map >= quota.map) break; push({ kind: "map", text: it.t, choices: [], answer: "", mapId: it.id }); }
+      // the book's questions are taken from every map in turn, so with 2 maps both are used (not all questions from the first one)
+      const queues = maps.map((m) => ({ id: m.id, qs: m.questions.slice() }));
+      for (let guard = 0; have.map < quota.map && queues.some((q) => q.qs.length) && guard < 500; guard++) {
+        for (const qu of queues) { const t = qu.qs.shift(); if (t !== undefined) { if (have.map >= quota.map) break; push({ kind: "map", text: t, choices: [], answer: "", mapId: qu.id }); } }
+      }
       // the book had fewer map questions than wanted (or none that could be read): the AI writes the rest by looking at the map picture
-      for (const m of maps) {
+      const needAi = maps.filter((m) => m.questions.length < 3 && (m.ctx ?? "").trim().length >= 200);
+      for (let mi = 0; mi < needAi.length; mi++) {
+        const m = needAi[mi];
         if (quota.map - have.map <= 0 || ctrl.signal.aborted) break;
-        if (m.questions.length >= 3 || (m.ctx ?? "").trim().length < 200) continue;
-        for (let attempt = 0; attempt < 3 && quota.map - have.map > 0; attempt++) {
-          const want = Math.max(1, Math.ceil(Math.min(3, quota.map - have.map) / (attempt + 1)));   // each retry asks for fewer, so it finishes in time
+        for (let attempt = 0; attempt < 2 && quota.map - have.map > 0; attempt++) {   // at most 2 tries: every request counts against the free limit
+          const want = Math.max(1, Math.ceil(Math.min(3, Math.ceil((quota.map - have.map) / (needAi.length - mi))) / (attempt + 1)));   // each retry asks for fewer, so it finishes in time
           let fail: Fail | null;
           try {
             const wait = lastReq + 12500 - Date.now(); if (lastReq && wait > 0) await sleep(wait, ctrl.signal);
@@ -531,7 +550,7 @@ export default function Home() {
       }
       if (!Object.keys(wantNow).length) continue; // nothing in this group suits the types still missing
       const sumOf = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0);
-      const BATCH_MAX = subject?.id === "social" ? 4 : 6;   // social studies answers are long: a big batch runs past the time limit
+      const BATCH_MAX = 6;                                  // the same for every subject (social studies works exactly like science: only the reading of the scanned pages differs)
       while (sumOf(wantNow) > BATCH_MAX) { const big = Object.keys(wantNow).sort((a, b) => wantNow[b] - wantNow[a])[0]; wantNow[big]--; }
       for (const k of Object.keys(wantNow)) if (wantNow[k] <= 0) delete wantNow[k]; // a type reduced to 0 must NOT come back as 1 (that made a batch of 14)
       if (!Object.keys(wantNow).length) continue;
@@ -585,7 +604,7 @@ export default function Home() {
       return;
     }
     const info = `${subject?.name ?? "ذكاء اصطناعي"}${gradeName(stage, level) ? ` · ${gradeName(stage, level)}` : stage ? ` · ${STAGE_LABEL[stage]}` : ""} · ${rangeLabel}${topic.trim() ? ` · ${topic.trim()}` : ""} · ${DIFFS.find(([k]) => k === difficulty)?.[1]}`;
-    const sets = dealSets(got, versions).filter((s) => s.length);
+    const sets = dealSets(spreadMaps(got, versions), versions).filter((s) => s.length);
     const askReview = "راجع الأسئلة ثم اضغط «إنشاء الاختبار».";
     let message = "";
     if (end.phase === "stopped") message = `تم الإيقاف — كُتب ${got.length} سؤالًا. ${askReview}`;
@@ -636,7 +655,8 @@ export default function Home() {
       const used = new Set([...d.sets.flat().flatMap((x) => (x.q ? [x.q.text] : [])), ...d.removed].map(normQ));
       const pool = (d.mapData ?? []).flatMap((m) => (m.questions ?? []).map((t) => ({ id: m.id, t }))).filter((x) => !used.has(normQ(x.t)));
       for (const sl of mapSlots) {
-        const it = pool.shift();
+        const k = pool.findIndex((x) => x.id === sl.q?.mapId);                 // the same map as the deleted question first
+        const it = k >= 0 ? pool.splice(k, 1)[0] : pool.shift();
         if (it) patchSlot(sl.id, { state: "ok", err: undefined, q: { kind: "map", text: it.t, choices: [], answer: "", mapId: it.id } });
         else patchSlot(sl.id, { state: "failed", err: "لا توجد أسئلة خريطة أخرى في الكتاب" });
       }
@@ -968,7 +988,6 @@ export default function Home() {
                       </div>
                       {isSocial && <div className="smart-row"><span>الخرائط</span>{mapBusy ? <span className="tag"><span className="spinner" /> جارٍ البحث عن الخرائط…</span> : maps.length ? maps.map((m) => <span key={m.id} className="tag on" title="خريطة قُصّت من صفحة الكتاب مع أسئلتها، وستُطبع في الاختبار كما هي">🗺️ ص {m.page} · {m.questions.length ? `${m.questions.length} سؤال` : "أسئلة من الخريطة"}</span>) : <span className="hint" style={{ margin: 0 }}>لا توجد خرائط في الصفحات المحددة</span>}</div>}
                       {subject.id === "english" && age && <div className="smart-row"><span>سنّ القارئ</span><span className="tag" title="تُكتب القصة بهذا المستوى (من الصف الموجود في الكتاب، أو من صعوبة النص)">{age} سنة تقريبًا{gradeName(stage, level) ? ` · ${gradeName(stage, level)}` : " · من مستوى النص"}</span></div>}
-                      {suggestTotal > 0 && <button type="button" className="btn-ghost" onClick={applySuggestion}>⚡ تطبيق الأعداد المقترحة ({suggestTotal} سؤال في النسخة)</button>}
                     </div>
                   ) : null}
                 </div>
@@ -986,7 +1005,6 @@ export default function Home() {
                         {list.map((kd) => {
                     const st = needRange && analysisReady ? kindStatus(kd, stage, level, avail) : { ok: true } as { ok: boolean; why?: string };
                     const on = !locked && (st.ok || (forced.includes(kd.id) && (kd.id !== "map" || maps.length > 0)));
-                    const sug = avail?.[kd.id]?.suggest ?? 0;
                     return (
                       <div key={kd.id} className={`qc${on ? "" : " off"}`}>
                         <label className="qc-l" htmlFor={`qc-${kd.id}`}>{kd.label}</label>
@@ -996,7 +1014,7 @@ export default function Home() {
                           onBlur={() => setCountText((p) => ({ ...p, [kd.id]: String(perType[kd.id]) }))} />
                         {locked ? null : !on
                           ? <span className="qc-why">{st.why}{kd.id !== "map" && <button type="button" onClick={() => { touchedCounts.current = true; setForced((f) => [...f, kd.id]); setCountText((p) => ({ ...p, [kd.id]: "2" })); }}>تفعيل</button>}</span>
-                          : <>{kd.hint ? <span className="qc-hint">{kd.hint}</span> : null}{needRange && sug > 0 ? <span className="qc-sug">مقترح: {sug}</span> : null}</>}
+                          : <>{kd.hint ? <span className="qc-hint">{kd.hint}</span> : null}</>}
                       </div>
                     );
                   })}
