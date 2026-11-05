@@ -103,14 +103,15 @@ export const SUBJECTS: Subject[] = [
   {
     id: "social", name: "الدراسات", icon: "🌍", ready: true, lang: "ar", scope: "تاريخ · جغرافيا · تربية وطنية", skillsTitle: "مهارات",
     kinds: [
+      // FIRST kind = FIRST question on the exam sheet (sections follow this order): the map and its questions open the exam when there is one
+      // the map is cut out of the book page (lib/maps.ts) and printed on the exam above its questions
+      { id: "map", label: "أسئلة الخرائط", hint: "خريطة من الكتاب تُطبع في الاختبار مع أسئلتها", section: "أجب عن الأسئلة الآتية مستعينًا بالخريطة", group: "skills", grades: ALL },
       MCQ_AR, TF_AR, FILL_AR,
       { ...MATCH_AR },
       { id: "order", label: "رتّب الأحداث", hint: "ترتيب زمني أو منطقي", section: "رتّب الآتي ترتيبًا زمنيًا", group: "objective", grades: ALL },
       { ...TERM, section: "اكتب المصطلح الدال على كل عبارة مما يأتي" }, { ...DEFINE },
       { ...REASON }, { ...COMPARE },
       { id: "list", label: "اذكر / عدّد", hint: "أسباب · نتائج · أمثلة", section: "اذكر ما يأتي", group: "understanding", grades: ALL },
-      // the map is cut out of the book page (lib/maps.ts) and printed on the exam above its questions
-      { id: "map", label: "أسئلة الخرائط", hint: "خريطة من الكتاب تُطبع في الاختبار مع أسئلتها", section: "أجب عن الأسئلة الآتية مستعينًا بالخريطة", group: "skills", grades: ALL },
     ],
   },
   {

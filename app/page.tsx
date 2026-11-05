@@ -478,12 +478,53 @@ export default function Home() {
     let end: { phase: Gen["phase"]; message?: string } = { phase: "done" };
     let passStart = 0;
     let lastReq = 0; // free Gemini allows only ~5 requests/minute on 2.5-flash: keep ~12.5s between requests so we do not hit the per-minute limit
-    outer: for (let i = 0; i < groups.length * 4 && missing() > 0; i++) {
+    // ---- map questions: their own small requests (a picture makes a request slower, so it must never share one with the text questions) ----
+    // A map request that fails is skipped (after a short wait): the exam is finished without those questions instead of stopping.
+    let mapNote = "", stopAll = false;
+    const waitTurn = async () => { const wait = lastReq + 12500 - Date.now(); if (lastReq && wait > 0) await sleep(wait, ctrl.signal); lastReq = Date.now(); };
+    const mapPhase = async () => {
+      let fails = 0;
+      for (let i = 0; i < 12 && quota.map - have.map > 0 && maps.length && fails < 3; i++) {
+        const mp = maps[mapCursor % maps.length];
+        let ctx = (pagesOf[mp.fileId]?.[mp.page - 1] ?? "").trim();
+        if (ctx.length < 250) ctx = (ctx + "\n\n" + groups[0].map((c) => c.text).join("\n\n")).trim();
+        const before = have.map;
+        try { await waitTurn(); } catch { end = { phase: "stopped" }; stopAll = true; return; }
+        { const n = recordRequest(); setUsage((u) => (shared ? u + 1 : n)); }
+        setGen((g) => (g ? { ...g, message: "جارٍ كتابة أسئلة الخريطة…" } : g));
+        let fail: Fail | null;
+        try {
+          fail = await streamBatch({ context: ctx.slice(0, 6000), want: { map: Math.min(3, quota.map - have.map) }, avoid: got.slice(-40).map((q) => q.text), difficulty, topic: topic.trim(), subject: subject?.id, stage, level, branch, focus, age, maps: [{ id: mp.id, dataUrl: mp.dataUrl, hint: mp.hint }] }, ctrl.signal, push);
+        } catch {
+          if (ctrl.signal.aborted) { end = { phase: "stopped" }; stopAll = true; return; }
+          fail = { code: "network", message: "تعذّر الاتصال بالخادم." };
+        }
+        mapCursor++;                                    // the next try uses the next map
+        if (!fail) { fails = have.map > before ? 0 : fails + 1; continue; }
+        if (fail.code === "rate_day") {
+          const l: Limit = { kind: "day", until: Date.now() + msUntilPacificMidnight() };
+          saveLimit(l); setLimit(l);
+          end = { phase: "partial", message: `انتهى الحد اليومي المجاني للذكاء الاصطناعي. يتجدد بعد ${fmtDuration(l.until - Date.now())} تقريبًا.` }; stopAll = true; return;
+        }
+        fails++;
+        if (["rate_minute", "busy", "timeout", "network"].includes(fail.code)) {
+          const secs = clamp(fail.retryAfter ?? 10, 5, 45);
+          setLimit({ kind: fail.code === "rate_minute" ? "minute" : "busy", until: Date.now() + secs * 1000, why: `${fail.code}: ${fail.message}` });
+          try { await sleep(secs * 1000, ctrl.signal); } catch { end = { phase: "stopped" }; stopAll = true; setLimit(getLimit()); return; }
+          setLimit(getLimit());
+        } else { mapNote = fail.message; return; }      // a real error (bad key ...): the text questions will report it
+      }
+      if (quota.map - have.map > 0 && !mapNote) mapNote = "تعذّر كتابة بعض أسئلة الخريطة (الخادم مزدحم) — أعد المحاولة لاحقًا لإضافتها";
+    };
+    if (quota.map > 0 && maps.length) await mapPhase();
+    let consecutive = 0; // groups of the book in a row that failed because the AI was busy: after 3 the run stops and keeps what it has
+    outer: for (let i = 0; i < groups.length * 4 && missing() > 0 && !stopAll; i++) {
       const gi = i % groups.length;
       if (gi === 0 && i > 0) { if (got.length === passStart) break; passStart = got.length; } // extra pass only if the last one added something
       // how many of each type to ask for in this batch: the remaining need spread over the remaining text groups (max 8 questions per batch)
       const wantNow: Record<string, number> = {};
       for (const k of activeKinds) {
+        if (k === "map") continue;                       // written above, in its own requests
         const need = quota[k] - have[k];
         if (need <= 0) continue;
         let tot = 0;
@@ -493,7 +534,7 @@ export default function Home() {
       }
       if (!Object.keys(wantNow).length) continue; // nothing in this group suits the types still missing
       const sumOf = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0);
-      while (sumOf(wantNow) > 8) { const big = Object.keys(wantNow).sort((a, b) => wantNow[b] - wantNow[a])[0]; wantNow[big]--; }
+      while (sumOf(wantNow) > 6) { const big = Object.keys(wantNow).sort((a, b) => wantNow[b] - wantNow[a])[0]; wantNow[big]--; }
       const avoid = got.slice(-40).map((q) => q.text); // so the next copies get questions that differ from the ones already written
       setGen((g) => (g ? { ...g, batch: gi + 1 } : g));
       for (let attempt = 0; ; attempt++) {
@@ -503,14 +544,14 @@ export default function Home() {
         for (const k of Object.keys(wantNow)) want[k] = Math.max(1, Math.ceil(wantNow[k] / (attempt + 1)));
         let fail: Fail | null;
         try {
-          const mp = want.map && maps.length ? maps[mapCursor % maps.length] : null;
+          const mp = null as MapItem | null;
           fail = await streamBatch({ context: groups[gi].map((c) => c.text).join("\n\n"), want, avoid, difficulty, topic: topic.trim(), subject: subject?.id, stage, level, branch, focus, age, maps: mp ? [{ id: mp.id, dataUrl: mp.dataUrl, hint: mp.hint }] : undefined }, ctrl.signal, push);
           if (mp && !fail) mapCursor++;
         } catch {
           if (ctrl.signal.aborted) { end = { phase: "stopped" }; break outer; }
           fail = { code: "network", message: "تعذّر الاتصال بالخادم. تأكد أن التطبيق ما زال يعمل." };
         }
-        if (!fail) break;
+        if (!fail) { consecutive = 0; break; }
 
         if (fail.code === "rate_day") {
           const l: Limit = { kind: "day", until: Date.now() + msUntilPacificMidnight() };
@@ -518,8 +559,13 @@ export default function Home() {
           end = { phase: "partial", message: `انتهى الحد اليومي المجاني للذكاء الاصطناعي. يتجدد بعد ${fmtDuration(l.until - Date.now())} تقريبًا.` };
           break outer;
         }
-        if ((fail.code === "rate_minute" || fail.code === "busy" || fail.code === "timeout") && attempt < 3) {
-          const secs = clamp(fail.retryAfter ?? 20, 5, 90);
+        if ((fail.code === "rate_minute" || fail.code === "busy" || fail.code === "timeout") && attempt >= 2) {
+          // this part of the book keeps failing: leave it and try the NEXT part (the AI is often busy only for a minute or two)
+          if (++consecutive >= 3) { end = { phase: "partial", message: `${fail.message} — توقفنا بعد عدة محاولات فاشلة، وتم الاحتفاظ بما كُتب` }; break outer; }
+          break;
+        }
+        if ((fail.code === "rate_minute" || fail.code === "busy" || fail.code === "timeout") && attempt < 2) {
+          const secs = clamp((fail.retryAfter ?? 20) * (attempt + 1), 5, 90);
           setLimit({ kind: fail.code === "busy" || fail.code === "timeout" ? "busy" : "minute", until: Date.now() + secs * 1000, why: `${fail.code}: ${fail.message}` });
           try { await sleep(secs * 1000, ctrl.signal); } catch { end = { phase: "stopped" }; setLimit(getLimit()); break outer; }
           setLimit(getLimit());
@@ -531,6 +577,7 @@ export default function Home() {
     }
     setLimit(getLimit());
     abortRef.current = null;
+    if (mapNote && end.phase === "done") end = { phase: "partial", message: mapNote };
 
     // finish: save whatever we have
     const endedAt = Date.now();

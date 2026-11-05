@@ -18,7 +18,7 @@ const DEADLINE_MS = 50_000; // stop talking to Gemini before Vercel kills the fu
 // "gemini-flash-latest" always points to the current free Flash model. Override with GEMINI_MODEL if needed.
 // Model names change over time (old ones get retired -> 404). So we ask Google which Flash models this key can use,
 // and try them in order. Each model has its own free quota, so if one is busy / slow / over its limit the next one is used.
-const FIRST_OUTPUT_MS = 22_000; // a model that writes nothing for this long is skipped
+const FIRST_OUTPUT_MS = 18_000; // a model that writes nothing for this long is skipped
 const modelCache = new Map<string, { at: number; list: string[] }>();
 async function pickModels(apiKey: string): Promise<string[]> {
   const pinned = process.env.GEMINI_MODEL ? [process.env.GEMINI_MODEL] : [];
@@ -333,7 +333,7 @@ export async function POST(req: Request) {
   if (want.map && (!mapPic || body.subject !== "social")) { n -= want.map; delete want.map; }
   if (want.story && body.subject !== "english") { n -= want.story; delete want.story; }
   if (want.story > 2) { n -= want.story - 2; want.story = 2; }            // a story is long: two per request keep the answer inside the time limit
-  if (want.map > 5) { n -= want.map - 5; want.map = 5; }
+  if (want.map > 3) { n -= want.map - 3; want.map = 3; }
   const types = Object.keys(want);
   if (context.trim().length < 200 || !types.length) return NextResponse.json({ code: "bad_request", error: "النص قصير جدًا أو لم تُحدَّد أنواع الأسئلة" }, { status: 400 });
   const level = LEVELS[body.difficulty ?? "mixed"] ?? LEVELS.mixed;
