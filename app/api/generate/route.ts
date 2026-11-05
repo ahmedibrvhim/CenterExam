@@ -131,6 +131,43 @@ const MATH_RULES = `- MATH EXCEPTION TO GROUNDING: you MAY (and should) invent N
 - mcq (اختر): a complete math question with exactly 4 choices and exactly one correct. Wrong choices are the results of common student mistakes (wrong sign, forgot a step, wrong operation, wrong unit) and look like the right one (same form and type). No two choices may be equal in value. answer = the exact text of the correct choice.
 - fill (أكمل): ONE short complete math statement or exercise in which the result or one missing number / expression (at most two blanks) is replaced by "______", e.g. "3/4 + 1/4 = ______", "إذا كان 2x + 3 = 11 فإن x = ______", "مساحة مستطيل طوله 8 سم وعرضه 5 سم = ______ سم²". The blank is a number, an expression or a unit-less result the student can find by a short calculation, never a linking word. The statement must have exactly one correct answer. choices = []. answer = the missing value(s) in the order of the blanks, separated by " - " (just the value, with its unit only if the blank asks for it).
 - solve (أجب عن الأسئلة): a question the student solves on paper. Start with a verb such as احسب / أوجد / حل / بسّط / اختصر / أوجد ناتج / جد. One short problem that asks for ONE final result (a word problem is allowed and may be 2-3 sentences). It must contain the given numbers. choices = []. answer = the worked solution, one step per line (the rule, the substitution, the result), ending with the final answer and its unit if any.`;
+// ---------- Arabic / Social studies / English (they use the general types mcq / tf / essay, but each subject now has its own rules) ----------
+const LANG_HEAD: Record<string, string> = {
+  arabic: "SUBJECT = Arabic language (اللغة العربية: نصوص، أدب، نحو، صرف، بلاغة، إملاء). Questions must test language skill and understanding, not memorising page layout.",
+  social: "SUBJECT = Social studies (الدراسات الاجتماعية: تاريخ، جغرافيا، تربية وطنية). Questions must test knowledge and understanding of the lesson, not page layout.",
+  english: "SUBJECT = English language. Write EVERY question, choice and answer in English (even if some book pages are in Arabic), and test English skill: vocabulary, grammar, reading comprehension, language functions.",
+};
+const LANG_RULES: Record<string, string[]> = {
+  arabic: [
+    "- Identify what kind of text each part is (قراءة / نص أدبي / قاعدة نحوية / صرف / بلاغة / إملاء) and write the matching kind of question. Spread the questions over the different skills the text offers: meaning of words (مرادف / ضد / جمع / مفرد), comprehension, the writer's idea, grammar (الإعراب، نوع الجملة، الفاعل، المبتدأ والخبر...), morphology, rhetoric (تشبيه، استعارة، كناية), spelling.",
+    "- LANGUAGE EXCEPTION TO GROUNDING: for grammar, morphology, rhetoric and spelling you MAY write NEW example sentences, but ONLY for the rules the text teaches, in the same style and difficulty as the book's examples. Facts about a text (its writer, its idea, its events) must come only from the text.",
+    "- The student has NO book. Any question about a passage must QUOTE the needed word, line or sentence inside the question itself (between quotation marks). Never write \"في النص\" / \"في الفقرة\" / \"السطر الثاني\" without quoting.",
+    "- Put full diacritics (التشكيل) on the words that grammar, morphology and spelling questions are about, and on any word that could be read in two ways. Write all other text with correct standard Arabic (فصحى), correct hamza / تاء / ألف مقصورة.",
+    "- mcq: for grammar and morphology the three wrong choices are the classic mistakes (another case ending, another part of speech, another form) and look like the right one. For vocabulary the choices are real Arabic words of the same type. Exactly one choice is correct under the rules the text teaches.",
+    "- tf: a statement about a rule, a word meaning or the text, fully true or fully false.",
+    "- essay (written answer): a short task such as أعرب ما تحته خط / استخرج من الجملة (فاعلًا، حالًا، مفعولًا به...) / ما معنى كذا / اشرح بيتًا أو عبارة / ما الفكرة العامة / ما نوع الأسلوب. The sentence to work on is written inside the question. answer = the full correct answer (for إعراب: the complete parsing of each word asked).",
+    "- ACCURACY: grammar and rhetoric answers must be exactly right. If you are not sure of the إعراب or the figure of speech, do not write the question.",
+  ],
+  social: [
+    "- Write questions about the real content of the lesson: people, places, dates, events, causes and results, definitions of terms, rights and duties, natural and human features. Spread them over the different parts of the lesson.",
+    "- The student has NO book, map, picture or timeline. Never refer to \"الخريطة\" / \"الشكل\" / \"الصورة\" / \"الجدول\". Describe a place by its name and a date as a number in the question when needed.",
+    "- NAMES, DATES AND NUMBERS must be copied exactly as the text gives them. Never change a date, a name or a number, and never invent one. If two sources in the text disagree, skip the question.",
+    "- Every question names its exact subject (the country, the battle, the ruler, the river, the law...): never \"هذه الدولة\" / \"هذا الحدث\". Add the period or place when the same name could mean two things.",
+    "- mcq: the 3 wrong choices are real names, places, dates or terms from the SAME lesson and of the same kind as the right one (e.g. other rulers of the same era, other cities of the same region). Only one is correct.",
+    "- tf: a statement that is fully true or fully false. A false statement changes ONE key name, date, place or cause to a believable wrong one taken from the lesson.",
+    "- essay (written answer): ما أسباب / ما نتائج / اذكر / علّل / عدّد / ما أهمية / ما الفرق بين... Only things the text explains. answer = a short model answer listing the points (1-4 short points).",
+  ],
+  english: [
+    "- Questions test English, written in English: vocabulary (meaning, synonym, antonym, odd one out), grammar (tenses, articles, prepositions, comparatives, conditionals, passive, question forms...), reading comprehension, and language functions (greetings, requests, advice, directions...). Match the mix to what the text teaches.",
+    "- LANGUAGE EXCEPTION TO GROUNDING: for vocabulary and grammar you MAY write NEW sentences, but ONLY for the words and grammar points the text teaches, at the same level as the book. Facts about a reading passage must come only from the passage.",
+    "- The student has NO book. A reading question must put the needed sentence INSIDE the question (quote it) before asking about it. Never write \"according to the text / passage\" without the quoted sentence.",
+    "- Use simple, natural, correct English suitable for the grade. Use vocabulary the text uses. No slang, no idioms the book did not teach.",
+    "- mcq: for grammar the wrong choices are the typical learner mistakes (wrong tense, wrong form, wrong preposition) and look like the right one. EXACTLY ONE choice must be correct in the sentence. For vocabulary all choices are real English words of the same kind. Put a blank \"______\" inside the sentence for fill-in-the-blank items.",
+    "- tf: a statement about the passage or a language fact, fully true or fully false.",
+    "- essay (written answer): short tasks such as: Answer the question in a full sentence / Rewrite the sentence in the passive / Correct the underlined mistake / Put the verb in the correct tense / Make a question for the underlined words. The sentence to work on is written inside the question. answer = the correct full answer.",
+    "- ACCURACY: every grammar answer must be exactly right. If a sentence could have two correct answers, rewrite it or skip it.",
+  ],
+};
 function subjectRules(subject: string, stage: Stage | null, level: number | null, branch: Branch | null, types: string[]): string {
   if (subject === "math") {
     const m = ["SUBJECT = Mathematics (رياضيات). Questions must test mathematical skill, not memorising page layout."];
@@ -138,6 +175,13 @@ function subjectRules(subject: string, stage: Stage | null, level: number | null
     if (stage && level) m.push(`GRADE = ${GRADE_ORD[level - 1]} ${STAGE_SHORT[stage]}. Match exactly the level of this grade's curriculum; do not use topics or difficulty from higher grades.`);
     else m.push("The school stage is unknown: infer it from the vocabulary and difficulty of the text and write questions at that level.");
     m.push(MATH_RULES);
+    return "\n\nSUBJECT RULES:\n" + m.join("\n");
+  }
+  if (subject === "arabic" || subject === "social" || subject === "english") {
+    const m = [LANG_HEAD[subject]];
+    if (stage) m.push(`STAGE = ${stage === "primary" ? "primary" : stage === "prep" ? "preparatory (middle)" : "secondary"} school.` + (level ? ` GRADE = ${GRADE_ORD[level - 1]} ${STAGE_SHORT[stage]}.` : "") + " Match exactly the level of this grade; no topics or difficulty from higher grades.");
+    else m.push("The school stage is unknown: infer it from the vocabulary and difficulty of the text and write questions at that level.");
+    m.push(...LANG_RULES[subject]);
     return "\n\nSUBJECT RULES:\n" + m.join("\n");
   }
   if (subject !== "science") return "";

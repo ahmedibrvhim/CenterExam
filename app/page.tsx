@@ -21,7 +21,7 @@ import { Limit, fmtDuration, getKeyId, getLimit, getUsage, isKeySeen, markKeySee
 type SrcFile = { id: string; name: string; size: number; file: File; pages?: string[]; progress?: [number, number] };
 type ToastState = { msg: string; kind: "success" | "error" | "info" } | null;
 
-const LETTERS = ["A", "B", "C", "D", "E", "F"];
+const LETTERS = ["A", "B"]; // every subject: at most two copies (A and B)
 const SUBJECT_KEY = "centerapp-subject";
 const zero = zeroCounts, zeroText = zeroTexts;
 const HEAD_PAGES = 3;      // cover pages read too when the book is scanned (they carry the grade)
@@ -88,7 +88,7 @@ export default function Home() {
   const [title, setTitle] = useState("");
   const [grade, setGrade] = useState(""); // total mark printed on the exam sheet (optional)
   // how many questions of each type ONE copy of the exam has (text, so typing "30" is not interrupted; clamped only when used)
-  const { can, active, isAdmin, refresh } = useAccess();
+  const { can, active, isAdmin, refresh, finishTrial: endTrialNow } = useAccess();
   const uid = useAuth().user?.uid ?? "";
   const [subjectId, setSubjectId] = useState<SubjectId | null | undefined>(undefined); // undefined = still reading the saved choice
   const subject = getSubject(subjectId);
@@ -96,7 +96,8 @@ export default function Home() {
   const touchedCounts = useRef(false);                   // true once the teacher typed a count: then the smart defaults stop overwriting it
   const [countText, setCountText] = useState<Record<Kind, string>>(zeroText());
   const activeKinds: Kind[] = subject ? subject.kinds.map((k) => k.id) : [];
-  const [versions, setVersions] = useState(1);
+  const [versions, setVersionsRaw] = useState(1);
+  const setVersions = (n: number) => setVersionsRaw(Math.min(LETTERS.length, Math.max(1, n)));
   const [topic, setTopic] = useState("");
   const [difficulty, setDifficulty] = useState("mixed");
   // page range of every chosen file (typed text). The file analysis of the science tool needs it and waits until typing pauses.
@@ -668,11 +669,9 @@ export default function Home() {
 
   // Free trial = ONE PDF: after the first successful PDF the trial ends and the teacher goes back to the subjects screen to subscribe.
   const finishTrial = async () => {
-    try { await authFetch("/api/trial/finish", { method: "POST", cache: "no-store" }); } catch {}
-    await refresh();
+    await endTrialNow(); // ends the trial on the server (retries) and locks the subjects; the subjects page then shows a "trial ended" notice
     try { sessionStorage.removeItem(SUBJECT_KEY); } catch {}
     setSubjectId(null);
-    notify("انتهت التجربة المجانية بعد أول ملف PDF. اختر مادة للاشتراك والمتابعة.", "info");
   };
   const download = async (e: Exam, v: string, key: boolean) => {
     const trialOnly = !isAdmin && active.length > 0 && active.every(isTrial);
@@ -834,7 +833,8 @@ export default function Home() {
                     <div className="smart">
                       <div className="smart-row">
                         <span>الملف</span>
-                        <span className="tag">{gradeName(stage, level) ?? (stage ? STAGE_LABEL[stage] : "الصف غير معروف")}</span>
+                        <span className="tag" title={detected.source === "lessons" ? "تم استنتاج المرحلة من أسماء الدروس (بدون استخدام الذكاء الاصطناعي)" : undefined}>{gradeName(stage, level) ?? (stage ? STAGE_LABEL[stage] : "الصف غير معروف")}{detected.source === "lessons" ? " (من أسماء الدروس)" : ""}</span>
+                        {detected.lessons.length > 0 && <span className="tag" title={detected.lessons.slice(0, 12).join(" · ")}>{detected.lessons.length} درس / وحدة</span>}
                         {subject.id === "science" && <span className="tag">{BRANCH_LABEL[branch]}</span>}
                         <span className="tag">{detected.pages} صفحة · {detected.facts} جملة معلومات</span>
                       </div>
@@ -887,7 +887,7 @@ export default function Home() {
 
               <div className="fgroup">
                 <h3 className="fg-t"><i>4</i> النسخ <small>كل نسخة بأسئلة مختلفة</small></h3>
-                <div className="chips six">
+                <div className="chips">
                   {LETTERS.map((l, i) => (
                     <button key={l} type="button" className="chip mono" aria-pressed={i < versions} aria-label={`${i + 1} نسخ`} onClick={() => setVersions(i + 1)}>{l}</button>
                   ))}

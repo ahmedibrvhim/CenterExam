@@ -20,6 +20,8 @@ type Ctx = {
   cancelOrder: () => Promise<string>;
   plansOpen: boolean; plansSubject: string | null; plansMode: "details" | "subscribe"; openPlans: (subject?: string | null, mode?: "details" | "subscribe") => void; closePlans: () => void;   // details = the header button (only shows my subscriptions); subscribe = tapping a locked subject
   lapsed: (subject: string) => boolean;        // had this subject (or all) before and it has ended
+  trialEnded: boolean;                         // the free trial is over (and nothing paid is running)
+  finishTrial: () => Promise<boolean>;         // the first PDF was downloaded: end the trial on the server (retries), then lock the subjects
 };
 const C = createContext<Ctx | null>(null);
 export const useAccess = () => { const c = useContext(C); if (!c) throw new Error("useAccess must be used inside <AccessProvider>"); return c; };
@@ -88,6 +90,20 @@ export default function AccessProvider({ children }: { children: ReactNode }) {
     setProfile(data.profile); setOrder(data.order); return "";
   }, []);
 
+  // The server ends the trial. A failed request must not leave the subjects open, so it is retried; the local state is then updated from the answer.
+  const finishTrial = useCallback(async () => {
+    let ended = false;
+    for (let i = 0; i < 3 && !ended; i++) {
+      const { ok, data } = await call("/api/trial/finish", {});
+      if (ok) { ended = true; break; }
+      await new Promise((r) => setTimeout(r, 600 * (i + 1)));
+      if (data?.code === "unauthenticated") break;
+    }
+    await refresh();
+    if (ended) setEnts((l) => l.map((e) => (isTrial(e) && e.expiresAt > Date.now() ? { ...e, expiresAt: Date.now() } : e))); // lock right away even if the refresh was slow
+    return ended;
+  }, [refresh]);
+
   const cancelOrder = useCallback(async () => {
     if (!order) return "";
     try {
@@ -103,10 +119,11 @@ export default function AccessProvider({ children }: { children: ReactNode }) {
     trialAvailable: !trialUsed && !entitlements.some((e) => !isTrial(e)), profile, entitlements, isAdmin, now, order,
     active: activeOf(entitlements, now),
     can: (subject: string) => isAdmin || covers(entitlements, subject, now),
-    refresh, saveProfile, redeem, createOrder, startTrial, cancelOrder,
+    refresh, saveProfile, redeem, createOrder, startTrial, cancelOrder, finishTrial,
+    trialEnded: entitlements.some((e) => isTrial(e) && e.expiresAt <= now) && !activeOf(entitlements, now).some((e) => !isTrial(e)),
     plansOpen, plansSubject, plansMode, openPlans: (s?: string | null, mode: "details" | "subscribe" = "subscribe") => { setPlansSubject(s ?? null); setPlansMode(mode); setPlansOpen(true); }, closePlans: () => setPlansOpen(false),
     lapsed: (subject: string) => entitlements.some((e) => (e.subject === "all" || e.subject === subject) && e.expiresAt <= now),
-  }), [status, error, profile, entitlements, isAdmin, now, order, refresh, saveProfile, redeem, createOrder, startTrial, cancelOrder, plansOpen, plansSubject, plansMode, ever, trialUsed]);
+  }), [status, error, profile, entitlements, isAdmin, now, order, refresh, saveProfile, redeem, createOrder, startTrial, cancelOrder, plansOpen, plansSubject, plansMode, ever, trialUsed, finishTrial]);
 
   return <C.Provider value={value}>{children}{plansOpen && status === "ready" && <SubscriptionModal />}</C.Provider>;
 }
