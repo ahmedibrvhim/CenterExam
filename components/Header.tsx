@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import GeminiKeyModal from "@/components/GeminiKeyModal";
+import ProfileModal from "@/components/ProfileModal";
 import ThemePicker from "@/components/ThemePicker";
 import Emblem from "@/components/Emblem";
 import { useAuth } from "@/components/AuthProvider";
@@ -11,8 +12,9 @@ import { entLabel, isForever, isLow, isTrial, leftText } from "@/lib/plans";
 export default function Header({ subject, onChangeSubject }: { subject?: SubjectId | null; onChangeSubject?: () => void }) {
   const s = getSubject(subject);
   const { user, signOut } = useAuth();
-  const { openPlans, active, now, isAdmin, order } = useAccess();
+  const { openPlans, active, now, isAdmin, order, profile } = useAccess();
   const [keyOpen, setKeyOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [menu, setMenu] = useState(false);               // the account menu (avatar): key, admin, sign out
   const acct = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -49,7 +51,8 @@ export default function Header({ subject, onChangeSubject }: { subject?: Subject
             </button>
             {menu && (
               <div className="acct-menu" role="menu">
-                <div className="acct-who"><b>{user.displayName || "حسابي"}</b>{user.email ? <small dir="ltr">{user.email}</small> : null}</div>
+                <div className="acct-who"><b>{profile?.name || user.displayName || "حسابي"}</b>{profile?.phone ? <small dir="ltr">{profile.phone}</small> : null}{user.email ? <small dir="ltr">{user.email}</small> : null}</div>
+                <button type="button" role="menuitem" className="acct-item" onClick={() => { setMenu(false); setProfileOpen(true); }}>✏️ تعديل الاسم والهاتف</button>
                 <button type="button" role="menuitem" className="acct-item" onClick={() => { setMenu(false); setKeyOpen(true); }}>🔑 مفتاح Gemini</button>
                 {isAdmin && <a role="menuitem" href="/admin" className="acct-item">👑 الإدارة</a>}
                 <button type="button" role="menuitem" className="acct-item danger" onClick={() => { setMenu(false); signOut(); }}>⎋ تسجيل الخروج</button>
@@ -71,6 +74,7 @@ export default function Header({ subject, onChangeSubject }: { subject?: Subject
         </div>
       </div>
       {keyOpen && <GeminiKeyModal onClose={() => setKeyOpen(false)} />}
+      {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} />}
     </header>
   );
 }
