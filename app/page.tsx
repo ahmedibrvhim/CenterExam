@@ -148,7 +148,8 @@ export default function Home() {
   // load saved exams + remembered daily limit when the page opens
   useEffect(() => {
     syncKey();
-    const onFocus = () => syncKey();
+    let lastSync = Date.now();
+    const onFocus = () => { if (Date.now() - lastSync < 30_000) return; lastSync = Date.now(); syncKey(); }; // at most every 30s (an input focus on a phone also fires this)
     window.addEventListener("focus", onFocus);
     const onKeyChanged = (e: Event) => { const h = (e as CustomEvent).detail?.hasKey; if (typeof h === "boolean") setNoKey(!h); void syncKey(); }; // hide / show the "add your key" banner right away
     window.addEventListener("gemini-key-changed", onKeyChanged);
@@ -478,8 +479,16 @@ export default function Home() {
     }
     const picked = pickChunks(all, topic, clamp(Math.ceil(count / 2), 2, 40));
     if (!picked.length) { notify(`لم أجد الموضوع «${topic}» في الصفحات المحددة`, "error"); return; }
+    // ONE plan for every subject (science, math, arabic, social, english): about 6 questions per request, so the free limit is not wasted.
+    // The picked parts of the book are split evenly between the requests (social studies used to end up in a single request).
+    const BATCH_MAX = 6;
+    const textTotal = ALL_KINDS.reduce((n, k) => (k === "map" ? n : n + perType[k] * versions), 0);
+    const nb = clamp(Math.ceil(textTotal / BATCH_MAX), 1, picked.length);
     const groups: Chunk[][] = [];
-    for (let i = 0; i < picked.length; i += 2) groups.push(picked.slice(i, i + 2));
+    for (let i = 0; i < nb; i++) groups.push(picked.slice(Math.floor((i * picked.length) / nb), Math.floor(((i + 1) * picked.length) / nb)));
+    const batchTotal = Math.max(groups.length, Math.ceil(textTotal / BATCH_MAX));
+    let started = 0, used = 0;                                       // started = batches shown on screen, used = requests really sent
+    const budget = batchTotal * 2 + 2;                               // hard cap on requests (retries included): the same for every subject
 
     // Every copy of the exam gets its OWN questions, so the AI must write (questions per copy) x (number of copies) of each type.
     const quota = zero(), have = zero();
@@ -489,7 +498,7 @@ export default function Home() {
     const sigs = groups.map((g) => extractSignals(g.map((c) => c.text).join("\n\n")));
     const weight = (k: Kind, j: number) => { const f = EVIDENCE[k]; return f ? f(sigs[j]) : 1; };
     const got: Q[] = [], seen = new Set<string>();
-    setGen({ phase: "writing", batch: 1, batches: groups.length, target: count, qs: [], startedAt });
+    setGen({ phase: "writing", batch: 1, batches: batchTotal, target: count, qs: [], startedAt });
     setTimeout(() => genRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50);
 
     const posCount = [0, 0, 0, 0, 0, 0];
@@ -526,7 +535,7 @@ export default function Home() {
             { const n = recordRequest(); setUsage((u) => (shared ? u + 1 : n)); }
             fail = await streamBatch({ context: m.ctx, want: { map: want }, avoid: got.slice(-40).map((q) => q.text), difficulty, topic: topic.trim(), subject: subject?.id, stage, level, branch, focus, age, maps: [{ id: m.id, dataUrl: m.dataUrl, hint: m.hint ?? "" }] }, ctrl.signal, push);
           } catch { if (ctrl.signal.aborted) { stopAll = true; break; } fail = { code: "network", message: "" }; }
-          if (!fail || fail.code === "rate_day") break;
+          if (!fail || fail.code !== "rate_minute") break;   // busy / timeout / other errors: do not spend more requests here, the text questions come first
           if (fail.code === "rate_minute") { try { await sleep(clamp((fail.retryAfter ?? 20) * 1000, 5000, 60000), ctrl.signal); } catch { stopAll = true; break; } }
         }
         if (stopAll) break;
@@ -550,13 +559,13 @@ export default function Home() {
       }
       if (!Object.keys(wantNow).length) continue; // nothing in this group suits the types still missing
       const sumOf = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0);
-      const BATCH_MAX = 6;                                  // the same for every subject (social studies works exactly like science: only the reading of the scanned pages differs)
       while (sumOf(wantNow) > BATCH_MAX) { const big = Object.keys(wantNow).sort((a, b) => wantNow[b] - wantNow[a])[0]; wantNow[big]--; }
       for (const k of Object.keys(wantNow)) if (wantNow[k] <= 0) delete wantNow[k]; // a type reduced to 0 must NOT come back as 1 (that made a batch of 14)
       if (!Object.keys(wantNow).length) continue;
       const avoid = got.slice(-40).map((q) => q.text); // so the next copies get questions that differ from the ones already written
-      setGen((g) => (g ? { ...g, batch: gi + 1 } : g));
+      { const b = Math.min(batchTotal, ++started); setGen((g) => (g ? { ...g, batch: b, batches: batchTotal } : g)); }
       for (let attempt = 0; ; attempt++) {
+        if (++used > budget) { end = { phase: "partial", message: "توقفنا لحماية الحد المجاني للذكاء الاصطناعي" }; break outer; }
         { const wait = lastReq + 12500 - Date.now(); if (lastReq && wait > 0) { try { await sleep(wait, ctrl.signal); } catch { end = { phase: "stopped" }; break outer; } } lastReq = Date.now(); }
         { const n = recordRequest(); setUsage((u) => (shared ? u + 1 : n)); }
         const want: Record<string, number> = {}; // each retry asks for fewer questions so it finishes faster
@@ -1009,7 +1018,7 @@ export default function Home() {
                       <div key={kd.id} className={`qc${on ? "" : " off"}`}>
                         <label className="qc-l" htmlFor={`qc-${kd.id}`}>{kd.label}</label>
                         <input id={`qc-${kd.id}`} type="text" inputMode="numeric" className="input mono" disabled={!on} value={on ? countText[kd.id] : "0"}
-                          onFocus={(e) => e.target.select()}
+                          onFocus={() => { if (countText[kd.id] === "0") setCountText((p) => ({ ...p, [kd.id]: "" })); }}
                           onChange={(e) => { touchedCounts.current = true; setCountText((p) => ({ ...p, [kd.id]: digitsOnly(e.target.value).slice(0, 3) })); }}
                           onBlur={() => setCountText((p) => ({ ...p, [kd.id]: String(perType[kd.id]) }))} />
                         {locked ? null : !on
