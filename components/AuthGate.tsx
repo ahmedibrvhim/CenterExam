@@ -8,7 +8,12 @@ import AccessProvider from "@/components/AccessProvider";
 import AccessGate from "@/components/AccessGate";
 
 // Facebook / Instagram / WhatsApp / Messenger / TikTok in-app browsers: Google refuses sign-in there (error 403 disallowed_useragent).
-const inAppBrowser = (ua: string) => /FBAN|FBAV|FB_IAB|Instagram|Line\/|MicroMessenger|Snapchat|TikTok|musical_ly|Messenger|WhatsApp/i.test(ua);
+// WhatsApp does NOT put its name in the browser it opens, so the names alone miss it. An Android WebView carries "; wv)", and an iPhone WebView has no "Safari/" part
+// (a website saved on the home screen also has none, so it is excluded).
+const inAppBrowser = (ua: string) =>
+  /FBAN|FBAV|FB_IAB|Instagram|Line\/|MicroMessenger|Snapchat|TikTok|musical_ly|Messenger|WhatsApp/i.test(ua)
+  || /; wv\)/.test(ua)
+  || (/iPhone|iPad|iPod/.test(ua) && !/Safari\//.test(ua) && !(navigator as any).standalone);
 
 function GoogleG() {
   return (
@@ -50,7 +55,10 @@ function GoogleButton({ onToken }: { onToken: (t: string) => void }) {
 }
 
 function LoginPage() {
-  const { signIn, signInWithGoogleToken, busy, error, configured } = useAuth();
+  const { signIn, signInWithGoogleToken, busy, error, stuck, configured, resetLogin } = useAuth();
+  const android = typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent);
+  // Android: this link asks the phone to open the page in Chrome itself (works from WhatsApp and most in-app browsers)
+  const chromeLink = () => `intent://${location.host}${location.pathname}${location.search}#Intent;scheme=https;package=com.android.chrome;end`;
   const [webview, setWebview] = useState(false);
   const [copied, setCopied] = useState(false);
   useEffect(() => { setWebview(inAppBrowser(navigator.userAgent)); }, []);
@@ -68,10 +76,11 @@ function LoginPage() {
         <p className="login-sub">مولّد امتحانات</p>
         <p className="login-lead">سجّل الدخول بحساب Google للمتابعة. تبقى مسجّلًا طوال الجلسة فقط، وعند إغلاق المتصفح يُطلب منك الدخول من جديد.</p>
 
-        {webview ? (
+        {webview || stuck ? (
           <div className="login-warn" role="alert">
             <b>افتح الرابط في المتصفح</b>
-            <span>Google لا تسمح بتسجيل الدخول داخل متصفح التطبيقات (فيسبوك / واتساب / إنستغرام). افتح الرابط في Chrome أو Safari.</span>
+            <span>Google لا تسمح بتسجيل الدخول داخل متصفح التطبيقات (واتساب / فيسبوك / إنستغرام). افتح الرابط في Chrome أو Safari.</span>
+            {android && <a className="btn-ghost" href={chromeLink()}>فتح في Chrome</a>}
             <button type="button" className="btn-ghost" onClick={copyLink}>{copied ? "تم النسخ ✓" : "نسخ الرابط"}</button>
           </div>
         ) : GOOGLE_CLIENT_ID ? (
@@ -85,6 +94,9 @@ function LoginPage() {
 
         {!configured && <p className="login-err" role="alert">لم يتم ربط Firebase بعد — أضف متغيرات <code dir="ltr">NEXT_PUBLIC_FIREBASE_*</code> في ملف <code dir="ltr">.env.local</code>.</p>}
         {error && <p className="login-err" role="alert">{error}</p>}
+        {/* WhatsApp's browser cannot always be detected: this note is always there, and the reset replaces "clean the tab" */}
+        {!webview && !stuck && <p className="login-note">فتحت الرابط من واتساب ولا يعمل الدخول؟ افتحه في Chrome أو Safari. <button type="button" className="link-btn" onClick={copyLink}>{copied ? "تم النسخ ✓" : "نسخ الرابط"}</button></p>}
+        {(error || stuck) && <button type="button" className="btn-ghost" onClick={resetLogin}>إعادة ضبط تسجيل الدخول</button>}
       </section>
     </main>
   );
