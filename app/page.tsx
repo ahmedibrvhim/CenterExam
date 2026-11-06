@@ -9,7 +9,7 @@ import AiStatus from "@/components/AiStatus";
 import GenerationPanel, { Gen } from "@/components/GenerationPanel";
 import Library from "@/components/Library";
 import ReviewPanel, { Draft, Slot } from "@/components/ReviewPanel";
-import { Chunk, Exam, OcrError, Q, chunkPages, dealSets, exportExam, extractPages, isBlankPage, ocrPages, pickChunks, shuffle } from "@/exam";
+import { Chunk, Exam, OcrError, Q, chunkPages, dealSets, exportExam, extractPages, extractPagesRtl, isBlankPage, ocrPages, pickChunks, shuffle } from "@/exam";
 import { listExams, removeExam, saveExam } from "@/lib/db";
 import { isTrial } from "@/lib/plans";
 import { Fail, streamBatch } from "@/lib/ai";
@@ -235,7 +235,7 @@ export default function Home() {
   // social studies: the maps found in the chosen pages (cut out of the PDF) and whether the search is still running
   const [maps, setMaps] = useState<MapItem[]>([]);
   const [mapBusy, setMapBusy] = useState(false);
-  const [wantMap, setWantMap] = useState(true);   // social studies: the teacher decides whether the exam gets a map question or not
+  const [wantMap, setWantMap] = useState<boolean | null>(null);   // social studies: null = the teacher has not answered yet "do you want a map question?"; the (heavy) map search only starts after he says yes
   const [scan, setScan] = useState<{ done: number; total: number; cover: number } | null>(null); // reading scanned pages right after upload (needed for the file analysis)
   const working = running || !!scan || files.some((f) => !f.pages) || !!draft?.sets.flat().some((x) => x.state === "loading");
   useEffect(() => {
@@ -343,7 +343,7 @@ export default function Home() {
   liveKeyRef.current = `${subject?.id}|${readyKey}`;
   useEffect(() => () => { mapCtrlRef.current?.abort(); }, []);
   useEffect(() => {
-    if (!isSocial) { if (mapKeyRef.current) { mapKeyRef.current = ""; mapCtrlRef.current?.abort(); setMaps([]); setMapBusy(false); } return; }
+    if (!isSocial || wantMap !== true) { if (mapKeyRef.current) { mapKeyRef.current = ""; mapCtrlRef.current?.abort(); setMaps([]); setMapBusy(false); } return; }
     if (!analysisReady || !detected) return;                     // keep what we have while the analysis is not ready
     const key = liveKeyRef.current;
     if (mapKeyRef.current === key) return;                       // same pages: the search already ran (or is running)
@@ -368,7 +368,11 @@ export default function Home() {
           const size = (m: MapSet) => m.a.length + m.b.length;
           const clean = (m: MapSet) => m.a.length >= 3 && m.b.length >= 1;
           const mapPages = [...new Set(shots.map((m) => m.page))];
-          const needOcr = mapPages.filter((pg) => !clean(extractMapSet(f.pages![pg - 1] ?? ""))).slice(0, 6);
+          // text rebuilt from the position of every piece (fast, no OCR): fixes cut / shuffled Arabic text layers; the better of the two readings is used
+          let rtl: Record<number, string> = {};
+          try { rtl = await extractPagesRtl(f.file, mapPages.flatMap((pg) => (pg < r.to ? [pg, pg + 1] : [pg]))); } catch {}
+          const bestSet = (pg: number): MapSet => { const x = extractMapSet(f.pages![pg - 1] ?? ""), y = extractMapSet(rtl[pg] ?? ""); return size(y) > size(x) ? y : x; };
+          const needOcr = mapPages.filter((pg) => !clean(bestSet(pg))).slice(0, 6);
           let ocrText: Record<number, string> = {};
           if (needOcr.length) {
             try { ocrText = await ocrPages(f.file, needOcr, ctrl.signal, { subject: "social", ai: true, onAi: () => {} }); }
@@ -378,10 +382,10 @@ export default function Home() {
           shots.forEach((m, i) => {
             if (seenPage.has(m.page)) return;
             seenPage.add(m.page);
-            let set = extractMapSet(f.pages![m.page - 1] ?? "");
+            let set = bestSet(m.page);
             const viaOcr = ocrText[m.page] ? extractMapSet(fixOcrYa(ocrText[m.page])) : null;
             if (viaOcr && size(viaOcr) > size(set)) set = viaOcr;
-            if (!set.a.length && !set.b.length && m.page < r.to) set = extractMapSet(f.pages![m.page] ?? "");   // the questions can sit on the next page
+            if (!set.a.length && !set.b.length && m.page < r.to) set = bestSet(m.page + 1);   // the questions can sit on the next page
             // EVERY map used on an exam comes with ITS OWN questions from the book: a picture without questions is left out
             if (size(set) === 0) return;
             found.push({ id: `${f.id.slice(0, 6)}-p${m.page}-${i}`, fileId: f.id, page: m.page, dataUrl: m.dataUrl, a: set.a, b: set.b });
@@ -393,7 +397,7 @@ export default function Home() {
     })();
     return () => { if (liveKeyRef.current !== key) { ctrl.abort(); setMapBusy(false); if (mapKeyRef.current === key) mapKeyRef.current = ""; } };   // only a CHANGE of pages / subject stops the search
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readyKey, subject?.id, analysisReady]);
+  }, [readyKey, subject?.id, analysisReady, wantMap]);
   const avail: Avail | null = (() => {
     const a = detected?.avail ?? null;
     if (!a || !isSocial) return a;
@@ -409,8 +413,8 @@ export default function Home() {
   for (const k of activeKinds) perType[k] = isOn(k) ? clamp(parseInt(toLatin(countText[k])) || 0, 0, MAX_PER_TYPE) : 0;
   const perVersion = ALL_KINDS.reduce((n, k) => n + perType[k], 0); // questions on one copy
   const count = perVersion * versions;                        // questions the AI must write in total: every copy has its own questions
-  const mapsUsable = isSocial && wantMap && maps.length > 0;              // a map with its questions is added automatically, one per copy
-  const canGenerate = ready && (perVersion > 0 || mapsUsable) && !running && !draft && !scan && analysisReady;
+  const mapsUsable = isSocial && wantMap === true && maps.length > 0;              // a map with its questions is added automatically, one per copy
+  const canGenerate = ready && (!isSocial || wantMap !== null) && (perVersion > 0 || mapsUsable) && !running && !draft && !scan && analysisReady;
 
   const chooseSubject = (id: SubjectId) => {
     if (!can(id)) return;
@@ -610,7 +614,7 @@ export default function Home() {
 
     // ---- map block: one map per copy, with ITS OWN questions from the book (part أ and part ب). No count, no AI. ----
     // 2 copies and 2+ maps -> each copy takes a different map; 2 copies and ONE map -> both copies print that same map with the same questions.
-    const mapPick = (wantMap ? [...maps] : []).sort((x, y) => y.a.length + y.b.length - (x.a.length + x.b.length));
+    const mapPick = (wantMap === true ? [...maps] : []).sort((x, y) => y.a.length + y.b.length - (x.a.length + x.b.length));
     const mapQs: Q[][] = Array.from({ length: versions }, (_, c) => {
       const m = mapPick.length ? mapPick[c % mapPick.length] : null;
       if (!m) return [];
@@ -1001,8 +1005,8 @@ export default function Home() {
                         {subject.kinds.filter((kd) => !kindStatus(kd, stage, level, avail).ok).map((kd) => <span key={kd.id} className="tag">{kd.label}</span>)}
                         {subject.kinds.every((kd) => kindStatus(kd, stage, level, avail).ok) && <span className="hint" style={{ margin: 0 }}>لا يوجد</span>}
                       </div>
-                      {isSocial && <div className="smart-row"><span>سؤال الخريطة</span><button type="button" className={`tag${wantMap ? " on" : ""}`} aria-pressed={wantMap} onClick={() => setWantMap(true)} style={{ cursor: "pointer" }}>نعم، أريد سؤال خريطة</button><button type="button" className={`tag${!wantMap ? " on" : ""}`} aria-pressed={!wantMap} onClick={() => setWantMap(false)} style={{ cursor: "pointer" }}>لا، بدون خريطة</button></div>}
-                      {isSocial && wantMap && <div className="smart-row"><span>الخرائط</span>{mapBusy ? <span className="tag"><span className="spinner" /> جارٍ البحث عن الخرائط وأسئلتها…</span> : maps.length ? <>{maps.map((m) => <span key={m.id} className="tag on" title="خريطة قُصّت من صفحة الكتاب ومعها أسئلتها من الكتاب">🗺️ ص {m.page} · {m.a.length + m.b.length} سؤال</span>)}<span className="hint" style={{ margin: 0 }}>{versions > 1 && maps.length > 1 ? "كل نسخة تأخذ خريطة مختلفة بأسئلتها" : versions > 1 ? "الخريطة نفسها بأسئلتها في كل النسخ" : "تُطبع الخريطة بأسئلتها في بداية الاختبار"}</span></> : <span className="hint" style={{ margin: 0 }}>لا توجد خريطة بأسئلتها في الصفحات المحددة</span>}</div>}
+                      {isSocial && <div className="smart-row"><span>هل تريد سؤال خريطة في الاختبار؟</span><button type="button" className={`tag${wantMap === true ? " on" : ""}`} aria-pressed={wantMap === true} onClick={() => setWantMap(true)} style={{ cursor: "pointer" }}>نعم، أريد سؤال خريطة</button><button type="button" className={`tag${wantMap === false ? " on" : ""}`} aria-pressed={wantMap === false} onClick={() => setWantMap(false)} style={{ cursor: "pointer" }}>لا، بدون خريطة</button></div>}
+                      {isSocial && wantMap === true && <div className="smart-row"><span>الخرائط</span>{mapBusy ? <span className="tag"><span className="spinner" /> جارٍ البحث عن الخرائط وأسئلتها…</span> : maps.length ? <>{maps.map((m) => <span key={m.id} className="tag on" title="خريطة قُصّت من صفحة الكتاب ومعها أسئلتها من الكتاب">🗺️ ص {m.page} · {m.a.length + m.b.length} سؤال</span>)}<span className="hint" style={{ margin: 0 }}>{versions > 1 && maps.length > 1 ? "كل نسخة تأخذ خريطة مختلفة بأسئلتها" : versions > 1 ? "الخريطة نفسها بأسئلتها في كل النسخ" : "تُطبع الخريطة بأسئلتها في بداية الاختبار"}</span></> : <span className="hint" style={{ margin: 0 }}>لا توجد خريطة بأسئلتها في الصفحات المحددة</span>}</div>}
                       {subject.id === "english" && age && <div className="smart-row"><span>سنّ القارئ</span><span className="tag" title="تُكتب القصة بهذا المستوى (من الصف الموجود في الكتاب، أو من صعوبة النص)">{age} سنة تقريبًا{gradeName(stage, level) ? ` · ${gradeName(stage, level)}` : " · من مستوى النص"}</span></div>}
                     </div>
                   ) : null}
@@ -1041,6 +1045,8 @@ export default function Home() {
                 <p className="hint qsum">
                   {locked
                     ? "حدّد الصفحات أولًا — بعد التحليل تُفتح أنواع الأسئلة التي يدعمها الملف."
+                    : isSocial && wantMap === null
+                    ? "اختر: هل تريد سؤال خريطة في الاختبار؟ (نعم / لا) ثم اضغط توليد."
                     : perVersion === 0 && !mapsUsable
                     ? "اكتب عدد سؤال واحد على الأقل (اكتب 0 لحذف نوع)."
                     : versions === 1

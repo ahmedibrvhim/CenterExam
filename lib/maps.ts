@@ -290,3 +290,38 @@ export function extractMapSet(text: string): MapSet {
 // Tesseract's most common Arabic slip on these pages: a dotted ي read as ب before ق / ر / ة ("إفربقيا", "وبقع", "المصربة"). Used ONLY on text read by Tesseract.
 export const fixOcrYa = (t: string): string =>
   t.replace(/إفرب/g, "إفري").replace(/ربق/g, "ريق").replace(/(^|\s)وبقع/g, "$1ويقع").replace(/(^|\s)(ال)?مصرب/g, "$1$2مصري").replace(/(^|\s)يقع/g, "$1يقع");
+
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// Rebuilds the text of a page of an ARABIC PDF from the POSITION of every piece of text.
+// Word / Google-Docs exports cut words into pieces ("حضار" + "ة") and pdf.js hands them back in the order they were drawn, not the order
+// they are read, so "(٣) دولة قامت بها حضارة أكسوم ...." arrives as "(3................... أكسوم ة) دولة قامت بها حضار" and the map questions
+// cannot be read. Here every row is rebuilt right-to-left by x, pieces that touch are glued (no space), pieces with a gap get a space, and a piece
+// that is drawn left-to-right but holds Arabic words (dots + words) has its words put back in reading order.
+// ---------------------------------------------------------------------------------------------------------------------------
+export type TextPiece = { str: string; x: number; y: number; w: number; dir?: string };
+const AR_LETTER = /[\u0600-\u06FF]/;
+export function linesFromPieces(pieces: TextPiece[]): string {
+  const rows: { y: number; its: TextPiece[] }[] = [];
+  for (const it of pieces) {
+    if (!it.str || !it.str.trim()) continue;
+    const r = rows.find((q) => Math.abs(q.y - it.y) <= 3);
+    if (r) r.its.push(it); else rows.push({ y: it.y, its: [it] });
+  }
+  rows.sort((a, b) => b.y - a.y);
+  return rows.map((r) => {
+    const rtl = r.its.some((i) => AR_LETTER.test(i.str));
+    const its = r.its.slice().sort((a, b) => (rtl ? b.x - a.x : a.x - b.x));
+    let out = "", prev: TextPiece | null = null;
+    for (const it of its) {
+      let t = it.str.replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, "");
+      if (rtl && it.dir === "ltr" && AR_LETTER.test(t) && /\s/.test(t.trim())) t = t.trim().split(/\s+/).reverse().join(" ");   // visual order -> reading order
+      if (prev) {
+        const gap = rtl ? prev.x - (it.x + it.w) : it.x - (prev.x + prev.w);
+        if (gap > 1.5 && !/\s$/.test(out) && !/^\s/.test(t)) out += " ";
+      }
+      out += t; prev = it;
+    }
+    return out.replace(/\s+/g, " ").trim();
+  }).join("\n");
+}

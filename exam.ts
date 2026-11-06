@@ -4,6 +4,7 @@ import { ALL_KINDS, getSubject, kindOrder, sectionTitle, type Kind } from "@/lib
 import { cleanMathText, linesFrom, readMathPage, type Engine, type Gray } from "@/lib/mathocr";
 import { fixArabicPage } from "@/lib/arabicFix";
 import { authFetch } from "@/lib/authFetch";
+import { linesFromPieces } from "@/lib/maps";
 export type Q = {
   text: string; choices: string[]; kind: Kind; answer?: string; explanation?: string;
   mapId?: string; // "map" questions: the id of the map picture (Exam.maps) printed above them
@@ -51,6 +52,25 @@ export async function extractPages(file: File, onProgress?: (done: number, total
     }
   } finally { doc.destroy?.(); }
   return pages;
+}
+
+// Same pages, but every line is rebuilt from the POSITION of its pieces (right-to-left): fixes Arabic PDFs whose words come out cut and shuffled
+// (Word / Docs exports). Only used for the map pages, where the exact wording of the book's own questions matters. nums are 1-based.
+export async function extractPagesRtl(file: File, nums: number[]): Promise<Record<number, string>> {
+  // @ts-ignore - pdfjs-dist 3.x ships without usable types for this path
+  const pdfjs: any = await import("pdfjs-dist/build/pdf");
+  pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.js", import.meta.url).toString();
+  const doc = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+  const out: Record<number, string> = {};
+  try {
+    for (const n of [...new Set(nums)].filter((x) => x >= 1 && x <= doc.numPages)) {
+      const page = await doc.getPage(n);
+      const items = (await page.getTextContent()).items as any[];
+      out[n] = linesFromPieces(items.map((it) => ({ str: String(it.str ?? ""), x: it.transform[4], y: it.transform[5], w: it.width ?? 0, dir: it.dir })));
+      page.cleanup();
+    }
+  } finally { doc.destroy?.(); }
+  return out;
 }
 
 // A page with (almost) no text layer is a scan: it is only a picture of a page.
